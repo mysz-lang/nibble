@@ -1,0 +1,15 @@
+[package]
+name = "nibble"
+version = "0.1.0"
+edition = "2021"
+authors = ["Mysz Team"]
+description = "The professional embedding environment and driver CLI for mysz-core."
+
+[dependencies]
+# Core language backend
+mysz-core = { git = "https://github.com/mysz-lang/mysz-core.git", branch = "main" }
+
+# System Architecture
+clap = { version = "4.4", features = ["derive", "env"] }
+anyhow = "1.0"
+tempfile = "3.8"
