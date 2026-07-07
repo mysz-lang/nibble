@@ -1,11 +1,16 @@
+use anyhow::{anyhow, Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use anyhow::{Context, Result, anyhow};
 
-pub fn link_binary(obj_path: &Path, output_exe: &Path, noruntime: bool, link_files: &[PathBuf]) -> Result<()> {
+pub fn link_binary(
+    obj_path: &Path,
+    output_exe: &Path,
+    noruntime: bool,
+    link_files: &[PathBuf],
+) -> Result<()> {
     let mut args = vec![obj_path.to_str().unwrap().to_string()];
-    let temp_runtime = "nibble_abi_runtime.c";
+    let temp_runtime = "nibble_runtime.c";
 
     if !noruntime {
         let runtime_source = include_str!("runtime.c");
@@ -15,7 +20,9 @@ pub fn link_binary(obj_path: &Path, output_exe: &Path, noruntime: bool, link_fil
 
     for file in link_files {
         if !file.exists() {
-            if !noruntime { let _ = fs::remove_file(temp_runtime); }
+            if !noruntime {
+                let _ = fs::remove_file(temp_runtime);
+            }
             return Err(anyhow!("Link file dependency target not found: {:?}", file));
         }
         args.push(file.to_string_lossy().into_owned());

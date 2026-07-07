@@ -29,7 +29,6 @@ enum Commands {
 
         #[arg(short = 'l', long = "link", value_name = "FILES", num_args = 1..)]
         link_files: Vec<PathBuf>,
-
     },
     Run {
         #[arg(value_name = "FILE")]
@@ -42,12 +41,14 @@ fn main() {
     let start_time = Instant::now();
 
     let result = match cli.command {
-        Commands::Build { input, output, optimize, noruntime, link_files } => {
-            compiler::Pipeline::new(input, output, optimize, noruntime, link_files).compile()
-        }
-        Commands::Run { input } => {
-            compiler::Pipeline::run_ephemeral(input)
-        }
+        Commands::Build {
+            input,
+            output,
+            optimize,
+            noruntime,
+            link_files,
+        } => compiler::Pipeline::new(input, output, optimize, noruntime, link_files).compile(),
+        Commands::Run { input } => compiler::Pipeline::run_ephemeral(input),
     };
 
     if let Err(err) = result {
@@ -55,5 +56,8 @@ fn main() {
         std::process::exit(1);
     }
 
-    println!("\x1b[1;32mFinished\x1b[0m task in {:.2?}", start_time.elapsed());
+    println!(
+        "\x1b[1;32mFinished\x1b[0m task in {:.2?}",
+        start_time.elapsed()
+    );
 }
