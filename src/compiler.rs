@@ -64,7 +64,7 @@ impl Pipeline {
         pipeline.compile()?;
 
         println!("\x1b[1;34mExecuting\x1b[0m application binary loop...");
-        let mut child = Command::new(&target_exe)
+        let mut child = Command::new(target_exe)
             .spawn()
             .with_context(|| format!("Failed to spawn native run instance: {}", target_exe))?;
 
