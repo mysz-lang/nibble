@@ -95,7 +95,7 @@ pub fn install_package(package_alias: &str, source: &DependencySource) -> Result
             let prefix = archive_prefix.clone().unwrap_or_else(|| {
                 source
                     .split('/')
-                    .last()
+                    .next_back()
                     .unwrap_or("archive")
                     .replace(".tar.gz", "")
                     .replace(".zip", "")
