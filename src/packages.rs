@@ -11,7 +11,7 @@ pub enum DependencySource {
     Custom {
         source: String,
         root_dir: String,
-        archive_prefix: Option<String>, 
+        archive_prefix: Option<String>,
     },
 }
 
@@ -32,9 +32,10 @@ fn get_default_registry() -> HashMap<&'static str, PackageRegistryInfo> {
     registry.insert(
         "std",
         PackageRegistryInfo {
-            tarball_url: "https://github.com/mysz-lang/mysz-std/archive/refs/heads/main.tar.gz".to_string(),
+            tarball_url: "https://github.com/mysz-lang/mysz-std/archive/refs/heads/main.tar.gz"
+                .to_string(),
             archive_prefix: "mysz-std-main".to_string(),
-            root_dir: "src".to_string(), 
+            root_dir: "src".to_string(),
         },
     );
     registry
@@ -51,11 +52,16 @@ pub fn resolve_local_manifest() -> Result<()> {
         return Ok(());
     }
 
-    let content = fs::read_to_string(manifest_path)
-        .with_context(|| format!("Failed to read manifest file structure from {:?}", manifest_path))?;
-        
-    let manifest: Manifest = toml::from_str(&content)
-        .context("Syntax or configuration error inside your local 'nibble.toml' manifest definition")?;
+    let content = fs::read_to_string(manifest_path).with_context(|| {
+        format!(
+            "Failed to read manifest file structure from {:?}",
+            manifest_path
+        )
+    })?;
+
+    let manifest: Manifest = toml::from_str(&content).context(
+        "Syntax or configuration error inside your local 'nibble.toml' manifest definition",
+    )?;
 
     if let Some(deps) = manifest.dependencies {
         for (name, source) in deps {
@@ -81,9 +87,14 @@ pub fn install_package(package_alias: &str, source: &DependencySource) -> Result
                 .cloned()
                 .ok_or_else(|| anyhow!("Package identity shortcut '{}' is missing from the global default package registry registry.", registry_name))?
         }
-        DependencySource::Custom { source, root_dir, archive_prefix } => {
+        DependencySource::Custom {
+            source,
+            root_dir,
+            archive_prefix,
+        } => {
             let prefix = archive_prefix.clone().unwrap_or_else(|| {
-                source.split('/')
+                source
+                    .split('/')
                     .last()
                     .unwrap_or("archive")
                     .replace(".tar.gz", "")
@@ -97,30 +108,46 @@ pub fn install_package(package_alias: &str, source: &DependencySource) -> Result
         }
     };
 
-    println!("\x1b[1;36mDownloading\x1b[0m dependency '{}'...", package_alias);
-    
+    println!(
+        "\x1b[1;36mDownloading\x1b[0m dependency '{}'...",
+        package_alias
+    );
+
     let response = reqwest::blocking::get(&target_info.tarball_url)
         .with_context(|| format!("Network Connection Failure: Unable to pull remote tarball archive package target for dependency package '{}'. Double check your internet access setup.", package_alias))?;
 
     if !response.status().is_success() {
-        return Err(anyhow!("Repository network server endpoint tracking '{}' returned failure status code: {}", package_alias, response.status()));
+        return Err(anyhow!(
+            "Repository network server endpoint tracking '{}' returned failure status code: {}",
+            package_alias,
+            response.status()
+        ));
     }
 
     let tar_gz = flate2::read::GzDecoder::new(response);
     let mut archive = tar::Archive::new(tar_gz);
     let mut extracted_count = 0;
 
-    for entry_result in archive.entries().context("Failed to decode tar data chunk frames stream payload context")? {
-        let mut entry = entry_result.context("Corrupt binary payload segment detected inside download bundle")?;
-        let path = entry.path().context("Missing package entry path reference attributes")?.to_path_buf();
+    for entry_result in archive
+        .entries()
+        .context("Failed to decode tar data chunk frames stream payload context")?
+    {
+        let mut entry = entry_result
+            .context("Corrupt binary payload segment detected inside download bundle")?;
+        let path = entry
+            .path()
+            .context("Missing package entry path reference attributes")?
+            .to_path_buf();
         let components: Vec<_> = path.components().collect();
-        
+
         if components.len() < 2 {
             continue;
         }
 
         let first_dir = components[0].as_os_str().to_string_lossy();
-        if !first_dir.contains(&target_info.archive_prefix) && first_dir != target_info.archive_prefix {
+        if !first_dir.contains(&target_info.archive_prefix)
+            && first_dir != target_info.archive_prefix
+        {
             continue;
         }
 
@@ -131,7 +158,7 @@ pub fn install_package(package_alias: &str, source: &DependencySource) -> Result
 
         let relative_components: Vec<_> = components.iter().skip(2).collect();
         if relative_components.is_empty() {
-            continue; 
+            continue;
         }
 
         let mut final_relative_path = PathBuf::new();
@@ -142,7 +169,9 @@ pub fn install_package(package_alias: &str, source: &DependencySource) -> Result
         let out_file_path = target_pkg_base.join(&final_relative_path);
 
         if let Some(parent) = out_file_path.parent() {
-            fs::create_dir_all(parent).context("Failed to initialize target output system folders hierarchy mapping requirements")?;
+            fs::create_dir_all(parent).context(
+                "Failed to initialize target output system folders hierarchy mapping requirements",
+            )?;
         }
 
         if entry.header().entry_type().is_file() {

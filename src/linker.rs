@@ -63,7 +63,10 @@ pub fn link_binary(
     if let Some(parent) = output_exe.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent).with_context(|| {
-                format!("Failed to create output binary destination layout at path: {:?}", parent)
+                format!(
+                    "Failed to create output binary destination layout at path: {:?}",
+                    parent
+                )
             })?;
         }
     }
@@ -113,6 +116,9 @@ pub fn link_binary(
         Ok(())
     } else {
         let stderr_msg = String::from_utf8_lossy(&output.stderr);
-        Err(anyhow!("Compilation phase interrupted by host platform compiler linkage pipeline:\n{}", stderr_msg))
+        Err(anyhow!(
+            "Compilation phase interrupted by host platform compiler linkage pipeline:\n{}",
+            stderr_msg
+        ))
     }
 }

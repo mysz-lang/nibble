@@ -62,9 +62,10 @@ fn main() {
         } => compiler::Pipeline::new(input, output, optimize, noruntime, link_files, include)
             .compile(),
         Commands::Run { input, include } => compiler::Pipeline::run_ephemeral(input, include),
-        Commands::Install { package } => {
-            packages::install_package(&package, &packages::DependencySource::Named(package.clone()))
-        }
+        Commands::Install { package } => packages::install_package(
+            &package,
+            &packages::DependencySource::Named(package.clone()),
+        ),
     };
 
     if let Err(err) = result {
