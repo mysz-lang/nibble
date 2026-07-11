@@ -55,7 +55,7 @@ impl Pipeline {
 
             let obj_path = tmp_dir.path().join(format!("{}.o", i));
 
-            mysz_core::compile_source(
+            mysz_core::compile_file(
                 &source_code,
                 obj_path
                     .to_str()
