@@ -93,3 +93,15 @@ nibble install std
 [dependencies]
 std = "std"
 ```
+
+## Contributing to the Global Registry
+
+If you have built a library for the Mysz language and want users to be able to install it globally via `nibble install <your-package>`, we welcome contributions!
+
+To submit your package:
+1. Fork this repository.
+2. Open `src/packages.rs` and locate the `get_default_registry()` function.
+3. Append your package details to the map using the `PackageRegistryInfo` struct layout.
+4. Submit a **Pull Request**. 
+
+*Note: All PRs undergo manual code review to ensure repository safety, correct root-path mapping, and ecosystem compatibility before being merged.*
