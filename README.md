@@ -57,7 +57,7 @@ Create a `nibble.toml` file in the root of your project:
 std = "std"
 
 # 2. Pulling a custom module bundle directly from a remote archive URL:
-custom_std = { source = "[https://github.com/mysz-lang/mysz-std/archive/refs/heads/main.tar.gz](https://github.com/mysz-lang/mysz-std/archive/refs/heads/main.tar.gz)", root_dir = "src" }
+custom_std = { source = "https://github.com/mysz-lang/mysz-std/archive/refs/heads/main.tar.gz", root_dir = "src" }
 ```
 
 - `source`: The public URL pointing to a `.tar.gz` archive snapshot of the code library.
