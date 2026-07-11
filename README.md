@@ -65,3 +65,5 @@ Options:
 ## Runtime
 
 Nibble uses the standard runtime library for mysz: [mysz-lang/mysz-runtime](https://github.com/mysz-lang/mysz-runtime/)
+
+It also has an embedded repository able to fetch the standard library for mysz: [mysz-lang/mysz-std](https://github.com/mysz-lang/mysz-std)

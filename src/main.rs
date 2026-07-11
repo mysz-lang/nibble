@@ -1,5 +1,6 @@
 mod compiler;
 mod linker;
+mod packages;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -18,9 +19,6 @@ enum Commands {
         #[arg(value_name = "FILE")]
         input: Vec<PathBuf>,
 
-        #[arg(short, long, default_value = "main")]
-        output: PathBuf,
-
         #[arg(short = 'O', long)]
         optimize: bool,
 
@@ -32,6 +30,9 @@ enum Commands {
 
         #[arg(short = 'I', long = "include", value_name = "DIR")]
         include: Vec<PathBuf>,
+
+        #[arg(short, long, default_value = "main")]
+        output: PathBuf,
     },
     Run {
         #[arg(value_name = "FILE")]
@@ -39,6 +40,10 @@ enum Commands {
 
         #[arg(short = 'I', long = "include", value_name = "DIR")]
         include: Vec<PathBuf>,
+    },
+    Install {
+        #[arg(value_name = "PACK_NAME")]
+        package: String,
     },
 }
 
@@ -57,6 +62,9 @@ fn main() {
         } => compiler::Pipeline::new(input, output, optimize, noruntime, link_files, include)
             .compile(),
         Commands::Run { input, include } => compiler::Pipeline::run_ephemeral(input, include),
+        Commands::Install { package } => {
+            packages::install_package(&package, &packages::DependencySource::Named(package.clone()))
+        }
     };
 
     if let Err(err) = result {

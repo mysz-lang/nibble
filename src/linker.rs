@@ -28,11 +28,11 @@ fn fetch_runtime() -> Result<PathBuf> {
     );
 
     let response = reqwest::blocking::get(&download_url)
-        .context("Failed to connect to GitHub runtime repository")?;
+        .context("Connection failed. Check your network link to the GitHub runtime repository")?;
 
     if !response.status().is_success() {
         return Err(anyhow!(
-            "Failed to download runtime. Server responded with status: {}",
+            "Failed to pull runtime library binary. Server responded with status code: {}",
             response.status()
         ));
     }
@@ -41,11 +41,11 @@ fn fetch_runtime() -> Result<PathBuf> {
     let mut archive = tar::Archive::new(tar_gz);
     archive
         .unpack(&cache_dir)
-        .context("Failed to extract runtime tarball")?;
+        .context("Corrupt compression framework encountered while unpacking runtime tarball")?;
 
     if !target_lib_path.exists() {
         return Err(anyhow!(
-            "Download succeeded, but expected binary artifact '{}' was not found inside the extracted tarball.",
+            "Download completed successfully, but expected static asset '{}' was missing inside the archive context.",
             lib_name
         ));
     }
@@ -59,6 +59,15 @@ pub fn link_binary(
     noruntime: bool,
     link_files: &[PathBuf],
 ) -> Result<()> {
+    // CRITICAL FIX: Ensure the target output directory exists before generating output files
+    if let Some(parent) = output_exe.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create output binary destination layout at path: {:?}", parent)
+            })?;
+        }
+    }
+
     let mut args = Vec::new();
 
     for obj in obj_paths {
@@ -68,7 +77,7 @@ pub fn link_binary(
     let temp_runtime = "nibble_runtime.c";
 
     if !noruntime {
-        let runtime_lib_path = fetch_runtime().context("Runtime resolution failed")?;
+        let runtime_lib_path = fetch_runtime().context("Runtime layer alignment failed")?;
         args.push(runtime_lib_path.to_string_lossy().into_owned());
     }
 
@@ -77,7 +86,7 @@ pub fn link_binary(
             if !noruntime {
                 let _ = fs::remove_file(temp_runtime);
             }
-            return Err(anyhow!("Link file dependency target not found: {:?}", file));
+            return Err(anyhow!("Link parameter target path not found: {:?}", file));
         }
 
         args.push(file.to_string_lossy().into_owned());
@@ -94,7 +103,7 @@ pub fn link_binary(
     let output = Command::new(compiler)
         .args(&args)
         .output()
-        .with_context(|| format!("System linker error. Verify '{}' is installed.", compiler))?;
+        .with_context(|| format!("Platform system linker failed execution. Verify '{}' is installed and added to your path environment variables.", compiler))?;
 
     if !noruntime {
         let _ = fs::remove_file(temp_runtime);
@@ -104,6 +113,6 @@ pub fn link_binary(
         Ok(())
     } else {
         let stderr_msg = String::from_utf8_lossy(&output.stderr);
-        Err(anyhow!("Linker phase terminated abruptly:\n{}", stderr_msg))
+        Err(anyhow!("Compilation phase interrupted by host platform compiler linkage pipeline:\n{}", stderr_msg))
     }
 }

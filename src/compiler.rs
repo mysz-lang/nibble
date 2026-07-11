@@ -1,4 +1,5 @@
 use crate::linker;
+use crate::packages;
 use anyhow::{anyhow, Context, Result};
 use std::fs;
 use std::path::PathBuf;
@@ -25,6 +26,14 @@ impl Pipeline {
     ) -> Self {
         let mut include_paths = include;
 
+        if let Err(e) = packages::resolve_local_manifest() {
+            eprintln!("\x1b[1;33mManifest Resolution Warning:\x1b[0m {:?}", e);
+        }
+
+        if let Ok(packs_dir) = packages::get_packs_dir() {
+            include_paths.push(packs_dir);
+        }
+
         if include_paths.is_empty() {
             if let Ok(val) = std::env::var("NIBBLE_PATH") {
                 include_paths.push(PathBuf::from(val));
@@ -44,7 +53,6 @@ impl Pipeline {
 
     pub fn compile(&self) -> Result<()> {
         let tmp_dir = Builder::new().prefix("nibble-build-").tempdir()?;
-
         let mut object_files = Vec::new();
 
         println!("\x1b[1;34mCompiling\x1b[0m targets with mysz-core engine...");
@@ -56,7 +64,7 @@ impl Pipeline {
                 input,
                 obj_path
                     .to_str()
-                    .context("Temporary object path is not valid UTF-8")?,
+                    .context("Temporary object storage tracking allocation path could not yield valid UTF-8 symbols conversion formatting attributes")?,
                 &self.include_paths,
             )
             .map_err(|e| anyhow!("Mysz compiler core error:\n{}", e))?;
@@ -97,17 +105,16 @@ impl Pipeline {
         println!("\x1b[1;34mExecuting\x1b[0m application binary loop...");
         let mut child = Command::new(target_exe)
             .spawn()
-            .with_context(|| format!("Failed to spawn native run instance: {}", target_exe))?;
+            .with_context(|| format!("Failed to spawn native run instance execution handle at: {}", target_exe))?;
 
         let exit_status = child.wait()?;
-
         let _ = fs::remove_file(target_path);
 
         if exit_status.success() {
             Ok(())
         } else {
             Err(anyhow!(
-                "Target application exited with non-zero code: {:?}",
+                "Application run closed unexpectedly with bad condition result exit status execution frame identifier: {:?}",
                 exit_status.code()
             ))
         }

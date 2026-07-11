@@ -13,6 +13,7 @@ build:
 # run with root/sudo privilages
 install:
 	mkdir -p ~/.nibble/
+	mkdir -p ~/.nibble/packs/
 	install -m 755 ./target/release/nibble $(BINDIR)/$(BINARY)
 
 uninstall:
