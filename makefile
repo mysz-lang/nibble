@@ -7,6 +7,7 @@ BINDIR=$(PREFIX)/bin
 all: build
 
 build:
+	cargo update
 	cargo build --release
 
 # run with root/sudo privilages

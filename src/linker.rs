@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const RUNTIME_VERSION: &str = "0.2.6";
+const RUNTIME_VERSION: &str = "0.2.7";
 const REPO_URL: &str = "https://raw.githubusercontent.com/mysz-lang/mysz-runtime/main/binary";
 
 fn fetch_runtime() -> Result<PathBuf> {

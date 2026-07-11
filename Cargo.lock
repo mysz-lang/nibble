@@ -917,10 +917,11 @@ dependencies = [
 [[package]]
 name = "mysz-core"
 version = "0.1.0"
-source = "git+https://github.com/mysz-lang/mysz-core.git?branch=main#d659c7fa075b804eda65ac0585ee4bbf0126e204"
+source = "git+https://github.com/mysz-lang/mysz-core.git?branch=main#8854d8e31eb8aff94d6c0beaabb81c54de3ab92b"
 dependencies = [
  "clap",
  "cranelift",
+ "cranelift-codegen",
  "cranelift-frontend",
  "cranelift-module",
  "cranelift-native",
