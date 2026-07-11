@@ -80,3 +80,16 @@ Options:
   -h, --help     Print help
   -V, --version  Print version
 ```
+
+# Global catalog repository
+
+Currently the global catalog (an internal repository system) only contains std:
+
+```
+nibble install std
+```
+
+```toml
+[dependencies]
+std = "std"
+```
