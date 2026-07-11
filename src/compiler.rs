@@ -50,13 +50,10 @@ impl Pipeline {
         println!("\x1b[1;34mCompiling\x1b[0m targets with mysz-core engine...");
 
         for (i, input) in self.input.iter().enumerate() {
-            let source_code =
-                fs::read_to_string(input).with_context(|| format!("Failed to read {:?}", input))?;
-
             let obj_path = tmp_dir.path().join(format!("{}.o", i));
 
             mysz_core::compile_file(
-                &source_code,
+                input,
                 obj_path
                     .to_str()
                     .context("Temporary object path is not valid UTF-8")?,
