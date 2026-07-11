@@ -11,7 +11,7 @@ pub struct Pipeline {
     _optimize: bool,
     noruntime: bool,
     link_files: Vec<PathBuf>,
-    include_paths: Vec<PathBuf>, // ✨ Tracks directories to scan for modules
+    include_paths: Vec<PathBuf>,
 }
 
 impl Pipeline {
@@ -25,8 +25,6 @@ impl Pipeline {
     ) -> Self {
         let mut include_paths = include;
 
-        // Fallback: If no paths are supplied, look for an environment variable NIBBLE_PATH
-        // or look for a local 'std' folder right inside your local directory.
         if include_paths.is_empty() {
             if let Ok(val) = std::env::var("NIBBLE_PATH") {
                 include_paths.push(PathBuf::from(val));
@@ -57,7 +55,6 @@ impl Pipeline {
 
             let obj_path = tmp_dir.path().join(format!("{}.o", i));
 
-            // ✨ Modified: Forwarded reference to `self.include_paths` as the third parameter
             mysz_core::compile_source(
                 &source_code,
                 obj_path
@@ -96,7 +93,7 @@ impl Pipeline {
             false,
             false,
             Vec::new(),
-            include, // ✨ Feed include paths to run pipeline
+            include,
         );
         pipeline.compile()?;
 

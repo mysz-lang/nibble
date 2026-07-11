@@ -30,7 +30,6 @@ enum Commands {
         #[arg(short = 'l', long = "link", value_name = "FILES", num_args = 1..)]
         link_files: Vec<PathBuf>,
 
-        // ✨ Added: Custom include directories for 'use' searches
         #[arg(short = 'I', long = "include", value_name = "DIR")]
         include: Vec<PathBuf>,
     },
@@ -38,7 +37,6 @@ enum Commands {
         #[arg(value_name = "FILE")]
         input: PathBuf,
 
-        // ✨ Added: Include directories path flag for immediate ephemeral runs too
         #[arg(short = 'I', long = "include", value_name = "DIR")]
         include: Vec<PathBuf>,
     },

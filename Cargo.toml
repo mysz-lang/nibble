@@ -11,3 +11,7 @@ mysz-core = { git = "https://github.com/mysz-lang/mysz-core.git", branch = "main
 clap = { version = "4.4", features = ["derive", "env"] }
 anyhow = "1.0"
 tempfile = "3.8"
+dirs = "5.0"
+reqwest = { version = "0.12", features = ["blocking"] }
+flate2 = "1.0"
+tar = "0.4"
