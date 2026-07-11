@@ -5,65 +5,78 @@
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
 [![Mysz Backend](https://img.shields.io/badge/backend-mysz--core-blue.svg)](https://github.com/mysz-lang/mysz-core)
 
-`nibble` is the CLI driver for the **Mysz** compiler toolchain. It wraps `mysz-core` (which uses Cranelift for codegen) and handles everything you need to go from source to a running binary: reading your source files, keeping intermediate build artifacts safely out of the way, wiring up the ABI, and calling out to your system linker.
+`nibble` is the CLI driver and package manager for the **Mysz** programming language toolchain. It wraps `mysz-core` (which uses Cranelift for codegen) and manages the entire development lifecycle: resolving dependency manifests, fetching remote packages over the network, building intermediate compiler structures, aligning runtime libraries, and invoking your platform's native system linker to produce standalone binary builds.
 
 ---
 
-## What it does
+## Features
 
-* **One command, full pipeline**: `nibble` handles codegen, assembly, and linking so you don't have to chain together a bunch of separate tools.
-* **Sandboxed builds**: intermediate `.o` files and runtime source get generated in a temp directory, so a failed build won't leave junk behind in your project.
-* **Built-in runtime**: a small C runtime ships inside the `nibble` binary itself, giving you things like I/O and string concatenation (that's what powers the `+` operator) without needing anything external.
-* **`--noruntime` for bare-metal work**: strips out the standard runtime entirely if you're targeting embedded systems or something with its own custom runtime.
-* **`--link` for pulling in dependencies**: pass in `.c`, `.o`, `.a`, `.so`, or `.lib` files directly and `nibble` will fold them into the final link step.
+* **One-Command Build Pipeline**: Automates parsing, codegen, object assembly, and platform linkage in a single step.
+* **Declarative Package Management**: Manages project requirements through a local `nibble.toml` manifest file, automatically handling cross-module search paths.
+* **Hybrid Dependency Ecosystem**: Supports global package shortcuts (like `std`) as well as custom remote HTTP/GitHub source archives (`.tar.gz`) with tailored root folder filters.
+* **Sandboxed Build Isolation**: Isolates temporary `.o` frames inside standard OS temporary directories, ensuring aborted compilation passes do not clutter your workspace.
+* **Automatic Target Provisioning**: Seamlessly ensures directory hierarchies exist at the destination before running final linkage passes, avoiding common missing-directory linker issues.
+* **Detachable Engine Configurations**: Use `--noruntime` for bare-metal, embedded, or custom kernel architectures, or utilize `--link` to stitch external `.c`, `.o`, `.a`, `.so`, or `.lib` binaries into the executable.
 
 ---
 
-## Before you start
+## Prerequisites
 
-`nibble` doesn't do its own linking, it hands that off to a compiler already on your machine. You'll need one of:
+`nibble` delegates machine-code alignment and final executable building to an existing toolchain on your host platform. Ensure one of the following is globally available:
 
 * **Linux / macOS:** `cc`, `gcc`, or `clang`
-* **Windows:** `clang` (via LLVM) or MSVC build tools
+* **Windows:** `clang` (via LLVM) or MSVC Build Tools
 
 ---
 
-## Installing
+## Installation
 
 ```bash
-git clone https://github.com/mysz-lang/nibble.git
+git clone [https://github.com/mysz-lang/nibble.git](https://github.com/mysz-lang/nibble.git)
 cd nibble
 cargo build --release
 
-# then either:
+# Install locally via cargo:
 cargo install --path .
-# or manually drop the binary somewhere on your PATH:
-install -m 755 ./target/release/nibble {dir_on_path}
+
+# Or manually place the binary somewhere on your path:
+install -m 755 ./target/release/nibble /usr/local/bin/
 ```
 
----
+## Dependency Management & nibble.toml
 
-## Using it
+`nibble` reads a local `nibble.toml` file inside your project root to handle external dependencies. It automatically checks your cache directory (`~/.nibble/packs/`) and resolves missing dependencies right before starting a build pass.
+
+### Manifest Schema
+
+Create a `nibble.toml` file in the root of your project:
+
+```toml
+[dependencies]
+# 1. Using a registered shortcut from the global catalog:
+std = "std"
+
+# 2. Pulling a custom module bundle directly from a remote archive URL:
+custom_std = { source = "[https://github.com/mysz-lang/mysz-std/archive/refs/heads/main.tar.gz](https://github.com/mysz-lang/mysz-std/archive/refs/heads/main.tar.gz)", root_dir = "src" }
+```
+
+- `source`: The public URL pointing to a `.tar.gz` archive snapshot of the code library.
+- `root_dir`: The directory path inside the archive containing the `.mysz source files`. `nibble` automatically extracts this specific path and drops its contents into the package namespace, keeping repository assets like readmes, tests, and manifests out of your compiler search path.
+
+## Command Line Usage
 
 ```
-The mouse-y compiler driver for the Mysz programming languag.
+Mysz •<:3O-~
 
 Usage: nibble <COMMAND>
 
 Commands:
-  build  
-  run    
-  help   Print this message or the help of the given subcommand(s)
+  build    Compile source files and link dependencies into a native binary executable
+  run      Compile and execute a Mysz script ephemerally
+  install  Manually download and unpack a specific package from the global registry
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help     Print help
   -V, --version  Print version
 ```
-
----
-
-## Runtime
-
-Nibble uses the standard runtime library for mysz: [mysz-lang/mysz-runtime](https://github.com/mysz-lang/mysz-runtime/)
-
-It also has an embedded repository able to fetch the standard library for mysz: [mysz-lang/mysz-std](https://github.com/mysz-lang/mysz-std)
