@@ -3,7 +3,7 @@ name = "nibble"
 version = "0.1.0"
 edition = "2021"
 authors = ["Mysz Team"]
-description = "The mouse-y compiler driver for the Mysz programming languag."
+description = "Mysz •<:3O-~"
 
 [dependencies]
 mysz-core = { git = "https://github.com/mysz-lang/mysz-core.git", branch = "main" }

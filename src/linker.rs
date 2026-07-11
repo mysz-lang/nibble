@@ -4,18 +4,23 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub fn link_binary(
-    obj_path: &Path,
+    obj_paths: &[PathBuf],
     output_exe: &Path,
     noruntime: bool,
     link_files: &[PathBuf],
 ) -> Result<()> {
-    let mut args = vec![obj_path.to_str().unwrap().to_string()];
+    let mut args = Vec::new();
+
+    for obj in obj_paths {
+        args.push(obj.to_string_lossy().into_owned());
+    }
+
     let temp_runtime = "nibble_runtime.c";
 
     if !noruntime {
-        let runtime_source = include_str!("runtime.c");
-        fs::write(temp_runtime, runtime_source).context("Failed to dump embedded ABI source")?;
-        args.push(temp_runtime.to_string());
+        // let runtime_source = include_str!("runtime.so");
+        // fs::write(temp_runtime, runtime_source)?;
+        // args.push(temp_runtime.to_string());
     }
 
     for file in link_files {
@@ -25,11 +30,12 @@ pub fn link_binary(
             }
             return Err(anyhow!("Link file dependency target not found: {:?}", file));
         }
+
         args.push(file.to_string_lossy().into_owned());
     }
 
-    args.push("-o".to_string());
-    args.push(output_exe.to_str().unwrap().to_string());
+    args.push("-o".into());
+    args.push(output_exe.to_string_lossy().into_owned());
 
     #[cfg(target_os = "windows")]
     let compiler = "clang";

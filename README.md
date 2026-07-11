@@ -59,3 +59,9 @@ Options:
   -h, --help     Print help
   -V, --version  Print version
 ```
+
+---
+
+## Runtime
+
+Nibble uses the standard runtime library for mysz: [mysz-lang/mysz-runtime](https://github.com/mysz-lang/mysz-runtime/)

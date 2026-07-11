@@ -16,7 +16,7 @@ struct Cli {
 enum Commands {
     Build {
         #[arg(value_name = "FILE")]
-        input: PathBuf,
+        input: Vec<PathBuf>,
 
         #[arg(short, long, default_value = "main")]
         output: PathBuf,
@@ -29,10 +29,18 @@ enum Commands {
 
         #[arg(short = 'l', long = "link", value_name = "FILES", num_args = 1..)]
         link_files: Vec<PathBuf>,
+
+        // ✨ Added: Custom include directories for 'use' searches
+        #[arg(short = 'I', long = "include", value_name = "DIR")]
+        include: Vec<PathBuf>,
     },
     Run {
         #[arg(value_name = "FILE")]
         input: PathBuf,
+
+        // ✨ Added: Include directories path flag for immediate ephemeral runs too
+        #[arg(short = 'I', long = "include", value_name = "DIR")]
+        include: Vec<PathBuf>,
     },
 }
 
@@ -47,8 +55,10 @@ fn main() {
             optimize,
             noruntime,
             link_files,
-        } => compiler::Pipeline::new(input, output, optimize, noruntime, link_files).compile(),
-        Commands::Run { input } => compiler::Pipeline::run_ephemeral(input),
+            include,
+        } => compiler::Pipeline::new(input, output, optimize, noruntime, link_files, include)
+            .compile(),
+        Commands::Run { input, include } => compiler::Pipeline::run_ephemeral(input, include),
     };
 
     if let Err(err) = result {
