@@ -917,7 +917,7 @@ dependencies = [
 [[package]]
 name = "mysz-core"
 version = "0.1.0"
-source = "git+https://github.com/mysz-lang/mysz-core.git?branch=main#73d12f44652ea0450951cd953ff9abece5f885c7"
+source = "git+https://github.com/mysz-lang/mysz-core.git?branch=main#807cebcaa6470247bd60051241c4f2ee17cb0ec4"
 dependencies = [
  "clap",
  "cranelift",
