@@ -3,7 +3,9 @@ mod linker;
 mod packages;
 
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::fs::{File, create_dir};
+use std::io::Write;
+use std::path::{PathBuf};
 use std::time::Instant;
 
 #[derive(Parser)]
@@ -45,6 +47,10 @@ enum Commands {
         #[arg(value_name = "PACK_NAME")]
         package: String,
     },
+    Init {
+        #[arg(value_name = "project name")]
+        projname: Option<String>
+    },
 }
 
 fn main() {
@@ -66,6 +72,9 @@ fn main() {
             &package,
             &packages::DependencySource::Named(package.clone()),
         ),
+        Commands::Init { projname } => {
+            initialise(projname)
+        }
     };
 
     if let Err(err) = result {
@@ -77,4 +86,34 @@ fn main() {
         "\x1b[1;32mFinished\x1b[0m task in {:.2?}",
         start_time.elapsed()
     );
+}
+
+
+fn initialise(projname: Option<String>) -> Result<(), anyhow::Error> {
+    let mut base_dir = PathBuf::from(".");
+
+    if let Some(projname) = projname {
+        base_dir.push(projname);
+        create_dir(&base_dir)?;
+    }
+
+    let mut mainmysz = File::create(base_dir.join("main.mysz"))?;
+    let mut nibbletoml = File::create(base_dir.join("nibble.toml"))?;
+
+    let mainmysz_content = r#"use std::io;
+
+fn pub main(): int {
+    str_print("Hello, world!");
+    return 0;
+};"#;
+
+    mainmysz.write_all(mainmysz_content.as_bytes())?;
+
+    let nibbletoml_content = r#"[dependencies]
+std = "std"
+"#;
+
+    nibbletoml.write_all(nibbletoml_content.as_bytes())?;
+
+    Ok(())
 }
