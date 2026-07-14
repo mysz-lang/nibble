@@ -32,7 +32,7 @@
 ## Installation
 
 ```bash
-git clone [https://github.com/mysz-lang/nibble.git](https://github.com/mysz-lang/nibble.git)
+git clone https://github.com/mysz-lang/nibble.git
 cd nibble
 cargo build --release
 
