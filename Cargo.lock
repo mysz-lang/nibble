@@ -926,7 +926,7 @@ dependencies = [
 [[package]]
 name = "mysz-core"
 version = "0.1.0"
-source = "git+https://github.com/mysz-lang/mysz-core.git?branch=main#5ef3eb95e6e9b17f9f978a426ab6fcc79274d87a"
+source = "git+https://github.com/mysz-lang/mysz-core.git?branch=main#8b62c3a2ed7017b99a69db4c564d36d0e26080d0"
 dependencies = [
  "clap",
  "cranelift",
@@ -1537,9 +1537,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.52.4"
+version = "1.53.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "317fafbbe3f02fc663dad00ea6186197de963cd4190e86a26d8d0fae095539af"
+checksum = "d988bcd52dbe076d3d46903332f58c912b87a2c49b1428419a5845154762ffee"
 dependencies = [
  "bytes",
  "libc",
