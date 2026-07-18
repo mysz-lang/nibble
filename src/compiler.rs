@@ -137,7 +137,6 @@ impl Pipeline {
         }
 
         // Always use JSON for machine‑readable output.
-        mysz_core::check_file(&input, &include_paths, true)
-            .map_err(|e| anyhow!("{}", e))
+        mysz_core::check_file(&input, &include_paths, true).map_err(|e| anyhow!("{}", e))
     }
 }

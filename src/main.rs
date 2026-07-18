@@ -3,9 +3,9 @@ mod linker;
 mod packages;
 
 use clap::{Parser, Subcommand};
-use std::fs::{File, create_dir};
+use std::fs::{create_dir, File};
 use std::io::Write;
-use std::path::{PathBuf};
+use std::path::PathBuf;
 use std::time::Instant;
 
 #[derive(Parser)]
@@ -56,7 +56,7 @@ enum Commands {
     },
     Init {
         #[arg(value_name = "project name")]
-        projname: Option<String>
+        projname: Option<String>,
     },
 }
 
@@ -76,14 +76,14 @@ fn main() {
             include,
         } => compiler::Pipeline::new(input, output, optimize, noruntime, link_files, include)
             .compile(false),
-        Commands::Run { input, include } => compiler::Pipeline::run_ephemeral(input, include, false),
+        Commands::Run { input, include } => {
+            compiler::Pipeline::run_ephemeral(input, include, false)
+        }
         Commands::Install { package } => packages::install_package(
             &package,
             &packages::DependencySource::Named(package.clone()),
         ),
-        Commands::Init { projname } => {
-            initialise(projname)
-        }
+        Commands::Init { projname } => initialise(projname),
         Commands::Check { input, include } => {
             outp = false;
             compiler::Pipeline::check(input, include)
@@ -106,7 +106,6 @@ fn main() {
         }
     }
 }
-
 
 fn initialise(projname: Option<String>) -> Result<(), anyhow::Error> {
     let mut base_dir = PathBuf::from(".");
