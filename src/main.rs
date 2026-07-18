@@ -43,6 +43,13 @@ enum Commands {
         #[arg(short = 'I', long = "include", value_name = "DIR")]
         include: Vec<PathBuf>,
     },
+    Check {
+        #[arg(value_name = "FILE")]
+        input: PathBuf,
+
+        #[arg(short = 'I', long = "include", value_name = "DIR")]
+        include: Vec<PathBuf>,
+    },
     Install {
         #[arg(value_name = "PACK_NAME")]
         package: String,
@@ -57,6 +64,8 @@ fn main() {
     let cli = Cli::parse();
     let start_time = Instant::now();
 
+    let mut outp = true;
+
     let result = match cli.command {
         Commands::Build {
             input,
@@ -66,8 +75,8 @@ fn main() {
             link_files,
             include,
         } => compiler::Pipeline::new(input, output, optimize, noruntime, link_files, include)
-            .compile(),
-        Commands::Run { input, include } => compiler::Pipeline::run_ephemeral(input, include),
+            .compile(false),
+        Commands::Run { input, include } => compiler::Pipeline::run_ephemeral(input, include, false),
         Commands::Install { package } => packages::install_package(
             &package,
             &packages::DependencySource::Named(package.clone()),
@@ -75,17 +84,27 @@ fn main() {
         Commands::Init { projname } => {
             initialise(projname)
         }
+        Commands::Check { input, include } => {
+            outp = false;
+            compiler::Pipeline::check(input, include)
+        }
     };
+    if outp {
+        if let Err(err) = result {
+            eprintln!("\x1b[1;31mError:\x1b[0m {:?}", err);
+            std::process::exit(1);
+        }
 
-    if let Err(err) = result {
-        eprintln!("\x1b[1;31mError:\x1b[0m {:?}", err);
-        std::process::exit(1);
+        println!(
+            "\x1b[1;32mFinished\x1b[0m task in {:.2?}",
+            start_time.elapsed()
+        );
+    } else {
+        if let Err(err) = result {
+            eprintln!("{:?}", err);
+            std::process::exit(1);
+        }
     }
-
-    println!(
-        "\x1b[1;32mFinished\x1b[0m task in {:.2?}",
-        start_time.elapsed()
-    );
 }
 
 

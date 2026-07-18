@@ -51,7 +51,7 @@ impl Pipeline {
         }
     }
 
-    pub fn compile(&self) -> Result<()> {
+    pub fn compile(&self, jsonout: bool) -> Result<()> {
         let tmp_dir = Builder::new().prefix("nibble-build-").tempdir()?;
         let mut object_files = Vec::new();
 
@@ -66,6 +66,7 @@ impl Pipeline {
                     .to_str()
                     .context("Temporary object storage tracking allocation path could not yield valid UTF-8 symbols conversion formatting attributes")?,
                 &self.include_paths,
+                jsonout
             )
             .map_err(|e| anyhow!("Mysz compiler core error:\n{}", e))?;
 
@@ -84,7 +85,7 @@ impl Pipeline {
         Ok(())
     }
 
-    pub fn run_ephemeral(input: PathBuf, include: Vec<PathBuf>) -> Result<()> {
+    pub fn run_ephemeral(input: PathBuf, include: Vec<PathBuf>, jsonout: bool) -> Result<()> {
         let target_exe = if cfg!(target_os = "windows") {
             "ephemeral_run.exe"
         } else {
@@ -100,7 +101,7 @@ impl Pipeline {
             Vec::new(),
             include,
         );
-        pipeline.compile()?;
+        pipeline.compile(jsonout)?;
 
         println!("\x1b[1;34mExecuting\x1b[0m application binary loop...");
         let mut child = Command::new(target_exe).spawn().with_context(|| {
@@ -121,5 +122,22 @@ impl Pipeline {
                 exit_status.code()
             ))
         }
+    }
+
+    pub fn check(input: PathBuf, include: Vec<PathBuf>) -> Result<()> {
+        let mut include_paths = include;
+        if let Ok(packs_dir) = packages::get_packs_dir() {
+            include_paths.push(packs_dir);
+        }
+        if include_paths.is_empty() {
+            if let Ok(val) = std::env::var("NIBBLE_PATH") {
+                include_paths.push(PathBuf::from(val));
+            }
+            include_paths.push(PathBuf::from("."));
+        }
+
+        // Always use JSON for machine‑readable output.
+        mysz_core::check_file(&input, &include_paths, true)
+            .map_err(|e| anyhow!("{}", e))
     }
 }
