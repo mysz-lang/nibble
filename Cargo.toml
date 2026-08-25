@@ -1,12 +1,12 @@
 [package]
 name = "nibble"
-version = "0.1.0"
+version = "0.1.5"
 edition = "2024"
 authors = ["Mysz Team"]
 description = "Mysz •<:3O-~"
 
 [dependencies]
-mysz-core = "0.3.0"
+mysz-core = "0.3.1"
 
 clap = { version = "4.4", features = ["derive", "env"] }
 anyhow = "1.0"
