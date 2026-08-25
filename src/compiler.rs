@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use std::process::Command;
 use tempfile::Builder;
 
+use mysz_core::utils::ctx::CompilerCtx;
+
 pub struct Pipeline {
     input: Vec<PathBuf>,
     output: PathBuf,
@@ -13,6 +15,7 @@ pub struct Pipeline {
     noruntime: bool,
     link_files: Vec<PathBuf>,
     include_paths: Vec<PathBuf>,
+    compiler: packages::CompilerConfig,
 }
 
 impl Pipeline {
@@ -23,12 +26,12 @@ impl Pipeline {
         noruntime: bool,
         link_files: Vec<PathBuf>,
         include: Vec<PathBuf>,
-    ) -> Self {
+    ) -> Result<Self> {
         let mut include_paths = include;
 
-        if let Err(e) = packages::resolve_local_manifest() {
-            eprintln!("\x1b[1;33mManifest Resolution Warning:\x1b[0m {:?}", e);
-        }
+        packages::resolve_local_manifest()?;
+
+        let compiler = packages::compiler_config()?;
 
         if let Ok(packs_dir) = packages::get_packs_dir() {
             include_paths.push(packs_dir);
@@ -38,42 +41,58 @@ impl Pipeline {
             if let Ok(val) = std::env::var("NIBBLE_PATH") {
                 include_paths.push(PathBuf::from(val));
             }
+
             include_paths.push(PathBuf::from("."));
         }
 
-        Self {
+        Ok(Self {
             input,
             output,
             _optimize,
             noruntime,
             link_files,
             include_paths,
-        }
+            compiler,
+        })
     }
 
-    pub fn compile(&self, jsonout: bool) -> Result<()> {
-        let tmp_dir = Builder::new().prefix("nibble-build-").tempdir()?;
+    pub fn compile(&self) -> Result<()> {
+        let tmp_dir = Builder::new()
+            .prefix("nibble-build-")
+            .tempdir()?;
+
         let mut object_files = Vec::new();
 
-        println!("\x1b[1;34mCompiling\x1b[0m targets with mysz-core engine...");
+        println!(
+            "\x1b[1;34mCompiling\x1b[0m targets with mysz-core engine..."
+        );
 
         for (i, input) in self.input.iter().enumerate() {
             let obj_path = tmp_dir.path().join(format!("{}.o", i));
 
-            mysz_core::compile_file(
+            let target = self.compiler.target()?;
+
+            let ctx = CompilerCtx::new(
                 input,
+                &self.include_paths,
+                self.compiler.output_json,
+                target,
+            );
+
+            mysz_core::compile_file(
+                ctx,
                 obj_path
                     .to_str()
-                    .context("Temporary object storage tracking allocation path could not yield valid UTF-8 symbols conversion formatting attributes")?,
-                &self.include_paths,
-                jsonout
+                    .context("Temporary object path is not valid UTF-8")?,
             )
             .map_err(|e| anyhow!("Mysz compiler core error:\n{}", e))?;
 
             object_files.push(obj_path);
         }
 
-        println!("\x1b[1;34mLinking\x1b[0m platform objects...");
+        println!(
+            "\x1b[1;34mLinking\x1b[0m platform objects..."
+        );
 
         linker::link_binary(
             &object_files,
@@ -85,12 +104,16 @@ impl Pipeline {
         Ok(())
     }
 
-    pub fn run_ephemeral(input: PathBuf, include: Vec<PathBuf>, jsonout: bool) -> Result<()> {
+    pub fn run_ephemeral(
+        input: PathBuf,
+        include: Vec<PathBuf>,
+    ) -> Result<()> {
         let target_exe = if cfg!(target_os = "windows") {
             "ephemeral_run.exe"
         } else {
             "./ephemeral_run"
         };
+
         let target_path = PathBuf::from(target_exe);
 
         let pipeline = Self::new(
@@ -100,18 +123,25 @@ impl Pipeline {
             false,
             Vec::new(),
             include,
-        );
-        pipeline.compile(jsonout)?;
+        )?;
 
-        println!("\x1b[1;34mExecuting\x1b[0m application binary loop...");
-        let mut child = Command::new(target_exe).spawn().with_context(|| {
-            format!(
-                "Failed to spawn native run instance execution handle at: {}",
-                target_exe
-            )
-        })?;
+        pipeline.compile()?;
+
+        println!(
+            "\x1b[1;34mExecuting\x1b[0m application binary loop..."
+        );
+
+        let mut child = Command::new(target_exe)
+            .spawn()
+            .with_context(|| {
+                format!(
+                    "Failed to spawn native run instance execution handle at: {}",
+                    target_exe
+                )
+            })?;
 
         let exit_status = child.wait()?;
+
         let _ = fs::remove_file(target_path);
 
         if exit_status.success() {
@@ -124,19 +154,35 @@ impl Pipeline {
         }
     }
 
-    pub fn check(input: PathBuf, include: Vec<PathBuf>) -> Result<()> {
+    pub fn check(
+        input: PathBuf,
+        include: Vec<PathBuf>,
+    ) -> Result<()> {
         let mut include_paths = include;
+
         if let Ok(packs_dir) = packages::get_packs_dir() {
             include_paths.push(packs_dir);
         }
+
         if include_paths.is_empty() {
             if let Ok(val) = std::env::var("NIBBLE_PATH") {
                 include_paths.push(PathBuf::from(val));
             }
+
             include_paths.push(PathBuf::from("."));
         }
 
-        // Always use JSON for machine‑readable output.
-        mysz_core::check_file(&input, &include_paths, true).map_err(|e| anyhow!("{}", e))
+        let compiler = packages::compiler_config()?;
+        let target = compiler.target()?;
+
+        let ctx = CompilerCtx::new(
+            input,
+            &include_paths,
+            true,
+            target,
+        );
+
+        mysz_core::check_file(ctx)
+            .map_err(|e| anyhow!("{}", e))
     }
 }

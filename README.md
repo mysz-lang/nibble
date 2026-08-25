@@ -2,106 +2,391 @@
 
 # nibble
 
-[![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-2024-orange.svg)](https://www.rust-lang.org)
 [![Mysz Backend](https://img.shields.io/badge/backend-mysz--core-blue.svg)](https://github.com/mysz-lang/mysz-core)
 
-`nibble` is the CLI driver and package manager for the **Mysz** programming language toolchain. It wraps `mysz-core` (which uses Cranelift for codegen) and manages the entire development lifecycle: resolving dependency manifests, fetching remote packages over the network, building intermediate compiler structures, aligning runtime libraries, and invoking your platform's native system linker to produce standalone binary builds.
+`nibble` is the command-line tool and package manager for the **Mysz** programming language.
+
+It uses `mysz-core` to compile Mysz programs, manages project dependencies, and links the final program into a native executable.
 
 ---
 
 ## Features
 
-* **One-Command Build Pipeline**: Automates parsing, codegen, object assembly, and platform linkage in a single step.
-* **Declarative Package Management**: Manages project requirements through a local `nibble.toml` manifest file, automatically handling cross-module search paths.
-* **Hybrid Dependency Ecosystem**: Supports global package shortcuts (like `std`) as well as custom remote HTTP/GitHub source archives (`.tar.gz`) with tailored root folder filters.
-* **Sandboxed Build Isolation**: Isolates temporary `.o` frames inside standard OS temporary directories, ensuring aborted compilation passes do not clutter your workspace.
-* **Automatic Target Provisioning**: Seamlessly ensures directory hierarchies exist at the destination before running final linkage passes, avoiding common missing-directory linker issues.
-* **Detachable Engine Configurations**: Use `--noruntime` for bare-metal, embedded, or custom kernel architectures, or utilize `--link` to stitch external `.c`, `.o`, `.a`, `.so`, or `.lib` binaries into the executable.
+- Build Mysz programs into native executables.
+- Run Mysz programs directly.
+- Check Mysz source without building it.
+- Choose between the **Cranelift** and **LLVM** compiler backends.
+- Configure compiler settings in `nibble.toml`.
+- Download and manage packages.
+- Use packages from remote `.tar.gz` archives.
+- Automatically download the Mysz runtime when needed.
+- Link extra native files with `--link`.
+- Build without the runtime with `--noruntime`.
+- Create new projects with `nibble init`.
 
 ---
 
-## Prerequisites
+## Requirements
 
-`nibble` delegates machine-code alignment and final executable building to an existing toolchain on your host platform. Ensure one of the following is globally available:
+Nibble needs a native C compiler for the final linking step.
 
-* **Linux / macOS:** `cc`, `gcc`, or `clang`
-* **Windows:** `clang` (via LLVM) or MSVC Build Tools
+- **Linux / macOS:** `cc`, `gcc`, or `clang`
+- **Windows:** `clang` or MSVC Build Tools
 
 ---
 
 ## Installation
 
+Clone and build Nibble:
+
 ```bash
 git clone https://github.com/mysz-lang/nibble.git
 cd nibble
 cargo build --release
-
-# Install locally via cargo:
-cargo install --path .
-
-# Or manually place the binary somewhere on your path:
-install -m 755 ./target/release/nibble /usr/local/bin/
 ```
 
-## Dependency Management & nibble.toml
+Install with Cargo:
 
-`nibble` reads a local `nibble.toml` file inside your project root to handle external dependencies. It automatically checks your cache directory (`~/.nibble/packs/`) and resolves missing dependencies right before starting a build pass.
+```bash
+cargo install --path .
+```
 
-### Manifest Schema
+---
 
-Create a `nibble.toml` file in the root of your project:
+## Creating a Project
+
+Create a new project:
+
+```bash
+nibble init my-project
+```
+
+This creates:
+
+```text
+my-project/
+-- main.mysz
+-- nibble.toml
+```
+
+You can also create a project in the current directory:
+
+```bash
+nibble init
+```
+
+---
+
+## nibble.toml
+
+`nibble.toml` stores your project settings and dependencies.
+
+A simple project looks like this:
+
+```toml
+[compiler]
+target = "cranelift"
+output_json = false
+
+[dependencies]
+std = "std"
+```
+
+### Compiler Backend
+
+You can choose which `mysz-core` backend to use.
+
+For Cranelift:
+
+```toml
+[compiler]
+target = "cranelift"
+```
+
+For LLVM:
+
+```toml
+[compiler]
+target = "llvm"
+```
+
+This setting is used by `build`, `run`, and `check`.
+
+Cranelift is used by default if no backend is specified.
+
+* check compatibility between backend and your machine [here](https://github.com/mysz-lang/mysz-core#support)
+
+### JSON Output
+
+You can also enable JSON compiler output:
+
+```toml
+[compiler]
+target = "cranelift"
+output_json = true
+```
+
+This is useful for tools such as editors.
+
+---
+
+## Dependencies
+
+Dependencies are listed in `nibble.toml`:
 
 ```toml
 [dependencies]
-# 1. Using a registered shortcut from the global catalog:
 std = "std"
-
-# 2. Pulling a custom module bundle directly from a remote archive URL:
-custom_std = { source = "https://github.com/mysz-lang/mysz-std/archive/refs/heads/main.tar.gz", root_dir = "src" }
 ```
 
-- `source`: The public URL pointing to a `.tar.gz` archive snapshot of the code library.
-- `root_dir`: The directory path inside the archive containing the `.mysz source files`. `nibble` automatically extracts this specific path and drops its contents into the package namespace, keeping repository assets like readmes, tests, and manifests out of your compiler search path.
+Nibble downloads missing dependencies automatically when building a project.
 
-## Command Line Usage
+Packages are stored in:
 
-```
-Mysz •<:3O-~
-
-Usage: nibble <COMMAND>
-
-Commands:
-  build    Compile source files and link dependencies into a native binary executable
-  run      Compile and execute a Mysz script ephemerally
-  install  Manually download and unpack a specific package from the global registry
-  help     Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help     Print help
-  -V, --version  Print version
+```text
+~/.nibble/packs/
 ```
 
-# Global catalog repository
+### Custom Dependencies
 
-Currently the global catalog (an internal repository system) only contains std:
+You can also use a package from a remote archive:
 
+```toml
+[dependencies]
+my_library = {
+    source = "https://example.com/my-library.tar.gz",
+    root_dir = "src"
+}
 ```
+
+- `source` is the URL of the archive.
+- `root_dir` is the folder inside the archive containing the Mysz files.
+- `archive_prefix` can be used when Nibble cannot detect the archive's top-level folder.
+
+For example:
+
+```toml
+[dependencies]
+my_library = {
+    source = "https://example.com/my-library.tar.gz",
+    root_dir = "src",
+    archive_prefix = "my-library"
+}
+```
+
+---
+
+## Building
+
+Build a program:
+
+```bash
+nibble build main.mysz
+```
+
+This creates a program called `main`.
+
+Choose the output name:
+
+```bash
+nibble build main.mysz -o my_program
+```
+
+Build multiple files:
+
+```bash
+nibble build main.mysz other.mysz -o my_program
+```
+
+### Optimization
+
+Use `-O` to enable optimization:
+
+```bash
+nibble build main.mysz -O
+```
+
+### No Runtime
+
+Use `--noruntime` if you do not want Nibble to link the Mysz runtime:
+
+```bash
+nibble build main.mysz --noruntime
+```
+
+### Extra Files
+
+Use `--link` to pass extra files to the native linker:
+
+```bash
+nibble build main.mysz --link helper.o
+```
+
+You can pass more than one:
+
+```bash
+nibble build main.mysz \
+    --link helper.o \
+    --link library.a
+```
+
+---
+
+## Include Paths
+
+Add extra source directories with `-I`:
+
+```bash
+nibble build main.mysz -I ./libs
+```
+
+You can add multiple directories:
+
+```bash
+nibble build main.mysz \
+    -I ./libs \
+    -I ./vendor
+```
+
+Nibble also searches the package directory:
+
+```text
+~/.nibble/packs/
+```
+
+If no include paths are given, Nibble can also use the `NIBBLE_PATH` environment variable.
+
+---
+
+## Running
+
+Run a Mysz program:
+
+```bash
+nibble run main.mysz
+```
+
+Nibble builds a temporary executable, runs it, and then deletes it.
+
+The backend from `nibble.toml` is used automatically.
+
+---
+
+## Checking
+
+Check a Mysz file without building an executable:
+
+```bash
+nibble check main.mysz
+```
+
+You can also add include paths:
+
+```bash
+nibble check main.mysz -I ./libs
+```
+
+`check` uses JSON output so other tools can easily read the result.
+
+---
+
+## Installing Packages
+
+Install a package manually:
+
+```bash
 nibble install std
 ```
 
+Installed packages are stored in:
+
+```text
+~/.nibble/packs/
+```
+
+If the package is already installed, Nibble will not download it again.
+
+---
+
+## Global Packages
+
+Nibble currently has a small built-in package registry.
+
+The standard library can be installed with:
+
+```bash
+nibble install std
+```
+
+Or added to `nibble.toml`:
+
 ```toml
 [dependencies]
 std = "std"
 ```
 
-## Contributing to the Global Registry
+### Adding a Package
 
-If you have built a library for the Mysz language and want users to be able to install it globally via `nibble install <your-package>`, we welcome contributions!
+Packages can be added to the registry by editing `src/packages.rs` and adding an entry to `get_default_registry()`.
 
-To submit your package:
-1. Fork this repository.
-2. Open `src/packages.rs` and locate the `get_default_registry()` function.
-3. Append your package details to the map using the `PackageRegistryInfo` struct layout.
-4. Submit a **Pull Request**. 
+Example:
 
-*Note: All PRs undergo manual code review to ensure repository safety, correct root-path mapping, and ecosystem compatibility before being merged.*
+```rust
+registry.insert(
+    "my-package",
+    PackageRegistryInfo {
+        tarball_url: "https://example.com/my-package.tar.gz".to_string(),
+        archive_prefix: "my-package".to_string(),
+        root_dir: "src".to_string(),
+    },
+);
+```
+
+Then submit a pull request.
+
+---
+
+## Runtime
+
+Nibble automatically downloads the Mysz runtime when a normal build needs it.
+
+The runtime is cached in:
+
+```text
+~/.nibble/cache/
+```
+
+Future builds use the cached copy.
+
+To build without it:
+
+```bash
+nibble build main.mysz --noruntime
+```
+
+---
+
+## Project Layout
+
+A basic project looks like:
+
+```text
+my-project/
+-- main.mysz
+-- nibble.toml
+```
+
+The package cache is kept outside the project:
+
+```text
+~/.nibble/
+-- cache/
+-- packs/
+```
+
+---
+
+## License
+
+See the repository's license files for licensing information.

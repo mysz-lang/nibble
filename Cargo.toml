@@ -1,12 +1,12 @@
 [package]
 name = "nibble"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 authors = ["Mysz Team"]
 description = "Mysz •<:3O-~"
 
 [dependencies]
-mysz-core = { git = "https://github.com/mysz-lang/mysz-core.git", branch = "main" }
+mysz-core = "0.3.0"
 
 clap = { version = "4.4", features = ["derive", "env"] }
 anyhow = "1.0"

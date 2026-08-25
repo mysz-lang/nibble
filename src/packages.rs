@@ -15,8 +15,35 @@ pub enum DependencySource {
     },
 }
 
+#[derive(Deserialize, Debug, Clone)]
+pub struct CompilerConfig {
+    #[serde(default = "default_target")]
+    pub target: String,
+
+    #[serde(default)]
+    pub output_json: bool,
+}
+
+fn default_target() -> String {
+    "cranelift".to_string()
+}
+
+impl CompilerConfig {
+    pub fn target(&self) -> Result<mysz_core::utils::ctx::CompilerTarget> {
+        match self.target.to_lowercase().as_str() {
+            "cranelift" => Ok(mysz_core::utils::ctx::CompilerTarget::Cranelift),
+            "llvm" => Ok(mysz_core::utils::ctx::CompilerTarget::Llvm),
+            target => Err(anyhow!(
+                "Unknown compiler target '{}'. Expected 'cranelift' or 'llvm'",
+                target
+            )),
+        }
+    }
+}
+
 #[derive(Deserialize, Debug)]
 pub struct Manifest {
+    pub compiler: Option<CompilerConfig>,
     pub dependencies: Option<HashMap<String, DependencySource>>,
 }
 
@@ -29,6 +56,7 @@ struct PackageRegistryInfo {
 
 fn get_default_registry() -> HashMap<&'static str, PackageRegistryInfo> {
     let mut registry = HashMap::new();
+
     registry.insert(
         "std",
         PackageRegistryInfo {
@@ -38,18 +66,21 @@ fn get_default_registry() -> HashMap<&'static str, PackageRegistryInfo> {
             root_dir: "src".to_string(),
         },
     );
+
     registry
 }
 
 pub fn get_packs_dir() -> Result<PathBuf> {
     let home_dir = dirs::home_dir().context("Could not find user home directory")?;
+
     Ok(home_dir.join(".nibble").join("packs"))
 }
 
-pub fn resolve_local_manifest() -> Result<()> {
+fn load_manifest() -> Result<Option<Manifest>> {
     let manifest_path = Path::new("nibble.toml");
+
     if !manifest_path.exists() {
-        return Ok(());
+        return Ok(None);
     }
 
     let content = fs::read_to_string(manifest_path).with_context(|| {
@@ -63,11 +94,29 @@ pub fn resolve_local_manifest() -> Result<()> {
         "Syntax or configuration error inside your local 'nibble.toml' manifest definition",
     )?;
 
+    Ok(Some(manifest))
+}
+
+pub fn compiler_config() -> Result<CompilerConfig> {
+    Ok(load_manifest()?
+        .and_then(|manifest| manifest.compiler)
+        .unwrap_or_else(|| CompilerConfig {
+            target: "cranelift".to_string(),
+            output_json: false,
+        }))
+}
+
+pub fn resolve_local_manifest() -> Result<()> {
+    let Some(manifest) = load_manifest()? else {
+        return Ok(());
+    };
+
     if let Some(deps) = manifest.dependencies {
         for (name, source) in deps {
             install_package(&name, &source)?;
         }
     }
+
     Ok(())
 }
 
@@ -82,11 +131,18 @@ pub fn install_package(package_alias: &str, source: &DependencySource) -> Result
     let target_info = match source {
         DependencySource::Named(registry_name) => {
             let registry = get_default_registry();
+
             registry
                 .get(registry_name.as_str())
                 .cloned()
-                .ok_or_else(|| anyhow!("Package identity shortcut '{}' is missing from the global default package registry registry.", registry_name))?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Package identity shortcut '{}' is missing from the global default package registry registry.",
+                        registry_name
+                    )
+                })?
         }
+
         DependencySource::Custom {
             source,
             root_dir,
@@ -100,6 +156,7 @@ pub fn install_package(package_alias: &str, source: &DependencySource) -> Result
                     .replace(".tar.gz", "")
                     .replace(".zip", "")
             });
+
             PackageRegistryInfo {
                 tarball_url: source.clone(),
                 archive_prefix: prefix,
@@ -114,7 +171,12 @@ pub fn install_package(package_alias: &str, source: &DependencySource) -> Result
     );
 
     let response = reqwest::blocking::get(&target_info.tarball_url)
-        .with_context(|| format!("Network Connection Failure: Unable to pull remote tarball archive package target for dependency package '{}'. Double check your internet access setup.", package_alias))?;
+        .with_context(|| {
+            format!(
+                "Network Connection Failure: Unable to pull remote tarball archive package target for dependency package '{}'. Double check your internet access setup.",
+                package_alias
+            )
+        })?;
 
     if !response.status().is_success() {
         return Err(anyhow!(
@@ -134,10 +196,12 @@ pub fn install_package(package_alias: &str, source: &DependencySource) -> Result
     {
         let mut entry = entry_result
             .context("Corrupt binary payload segment detected inside download bundle")?;
+
         let path = entry
             .path()
             .context("Missing package entry path reference attributes")?
             .to_path_buf();
+
         let components: Vec<_> = path.components().collect();
 
         if components.len() < 2 {
@@ -145,6 +209,7 @@ pub fn install_package(package_alias: &str, source: &DependencySource) -> Result
         }
 
         let first_dir = components[0].as_os_str().to_string_lossy();
+
         if !first_dir.contains(&target_info.archive_prefix)
             && first_dir != target_info.archive_prefix
         {
@@ -152,16 +217,19 @@ pub fn install_package(package_alias: &str, source: &DependencySource) -> Result
         }
 
         let second_dir = components[1].as_os_str().to_string_lossy();
+
         if second_dir != target_info.root_dir {
             continue;
         }
 
         let relative_components: Vec<_> = components.iter().skip(2).collect();
+
         if relative_components.is_empty() {
             continue;
         }
 
         let mut final_relative_path = PathBuf::new();
+
         for comp in relative_components {
             final_relative_path.push(comp);
         }
@@ -176,8 +244,12 @@ pub fn install_package(package_alias: &str, source: &DependencySource) -> Result
 
         if entry.header().entry_type().is_file() {
             entry.unpack(&out_file_path).with_context(|| {
-                format!("Failed parsing compression allocation targets to folder storage destination: {:?}", out_file_path)
+                format!(
+                    "Failed parsing compression allocation targets to folder storage destination: {:?}",
+                    out_file_path
+                )
             })?;
+
             extracted_count += 1;
         }
     }
@@ -185,13 +257,15 @@ pub fn install_package(package_alias: &str, source: &DependencySource) -> Result
     if extracted_count == 0 {
         return Err(anyhow!(
             "Archive downloaded successfully, but zero files matched your designated 'root_dir = \"{}\"' path filter within prefix layout framework context '{}'.",
-            target_info.root_dir, target_info.archive_prefix
+            target_info.root_dir,
+            target_info.archive_prefix
         ));
     }
 
     println!(
         "\x1b[1;32mInstalled\x1b[0m dependency '{}' successfully ({} files extracted).",
-        package_alias, extracted_count
+        package_alias,
+        extracted_count
     );
 
     Ok(())

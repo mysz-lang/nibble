@@ -36,6 +36,7 @@ enum Commands {
         #[arg(short, long, default_value = "main")]
         output: PathBuf,
     },
+
     Run {
         #[arg(value_name = "FILE")]
         input: PathBuf,
@@ -43,6 +44,7 @@ enum Commands {
         #[arg(short = 'I', long = "include", value_name = "DIR")]
         include: Vec<PathBuf>,
     },
+
     Check {
         #[arg(value_name = "FILE")]
         input: PathBuf,
@@ -50,10 +52,12 @@ enum Commands {
         #[arg(short = 'I', long = "include", value_name = "DIR")]
         include: Vec<PathBuf>,
     },
+
     Install {
         #[arg(value_name = "PACK_NAME")]
         package: String,
     },
+
     Init {
         #[arg(value_name = "project name")]
         projname: Option<String>,
@@ -74,21 +78,33 @@ fn main() {
             noruntime,
             link_files,
             include,
-        } => compiler::Pipeline::new(input, output, optimize, noruntime, link_files, include)
-            .compile(false),
+        } => compiler::Pipeline::new(
+            input,
+            output,
+            optimize,
+            noruntime,
+            link_files,
+            include,
+        )
+        .and_then(|pipeline| pipeline.compile()),
+
         Commands::Run { input, include } => {
-            compiler::Pipeline::run_ephemeral(input, include, false)
+            compiler::Pipeline::run_ephemeral(input, include)
         }
+
         Commands::Install { package } => packages::install_package(
             &package,
             &packages::DependencySource::Named(package.clone()),
         ),
+
         Commands::Init { projname } => initialise(projname),
+
         Commands::Check { input, include } => {
             outp = false;
             compiler::Pipeline::check(input, include)
         }
     };
+
     if outp {
         if let Err(err) = result {
             eprintln!("\x1b[1;31mError:\x1b[0m {:?}", err);
@@ -99,11 +115,9 @@ fn main() {
             "\x1b[1;32mFinished\x1b[0m task in {:.2?}",
             start_time.elapsed()
         );
-    } else {
-        if let Err(err) = result {
-            eprintln!("{:?}", err);
-            std::process::exit(1);
-        }
+    } else if let Err(err) = result {
+        eprintln!("{:?}", err);
+        std::process::exit(1);
     }
 }
 
@@ -127,7 +141,11 @@ fn pub main(): int {
 
     mainmysz.write_all(mainmysz_content.as_bytes())?;
 
-    let nibbletoml_content = r#"[dependencies]
+    let nibbletoml_content = r#"[compiler]
+target = "cranelift"
+output_json = false
+
+[dependencies]
 std = "std"
 "#;
 
