@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
@@ -264,8 +264,7 @@ pub fn install_package(package_alias: &str, source: &DependencySource) -> Result
 
     println!(
         "\x1b[1;32mInstalled\x1b[0m dependency '{}' successfully ({} files extracted).",
-        package_alias,
-        extracted_count
+        package_alias, extracted_count
     );
 
     Ok(())

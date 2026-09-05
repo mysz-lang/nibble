@@ -1,6 +1,7 @@
 use crate::linker;
+use crate::out::ResultType;
 use crate::packages;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -16,6 +17,7 @@ pub struct Pipeline {
     link_files: Vec<PathBuf>,
     include_paths: Vec<PathBuf>,
     compiler: packages::CompilerConfig,
+    result: ResultType,
 }
 
 impl Pipeline {
@@ -26,6 +28,7 @@ impl Pipeline {
         noruntime: bool,
         link_files: Vec<PathBuf>,
         include: Vec<PathBuf>,
+        result: ResultType,
     ) -> Result<Self> {
         let mut include_paths = include;
 
@@ -53,19 +56,16 @@ impl Pipeline {
             link_files,
             include_paths,
             compiler,
+            result,
         })
     }
 
     pub fn compile(&self) -> Result<()> {
-        let tmp_dir = Builder::new()
-            .prefix("nibble-build-")
-            .tempdir()?;
+        let tmp_dir = Builder::new().prefix("nibble-build-").tempdir()?;
 
         let mut object_files = Vec::new();
 
-        println!(
-            "\x1b[1;34mCompiling\x1b[0m targets with mysz-core engine..."
-        );
+        println!("\x1b[1;34mCompiling\x1b[0m targets with mysz-core engine...");
 
         for (i, input) in self.input.iter().enumerate() {
             let obj_path = tmp_dir.path().join(format!("{}.o", i));
@@ -90,24 +90,43 @@ impl Pipeline {
             object_files.push(obj_path);
         }
 
-        println!(
-            "\x1b[1;34mLinking\x1b[0m platform objects..."
-        );
+        match self.result {
+            ResultType::Binary => {
+                println!("\x1b[1;34mLinking\x1b[0m platform objects...");
 
-        linker::link_binary(
-            &object_files,
-            &self.output,
-            self.noruntime,
-            &self.link_files,
-        )?;
+                linker::link_binary(
+                    &object_files,
+                    &self.output,
+                    self.noruntime,
+                    &self.link_files,
+                )?;
+            }
+
+            ResultType::Object => {
+                println!("\x1b[1;34mOutputting\x1b[0m object...");
+
+                if object_files.len() != 1 {
+                    return Err(anyhow!(
+                        "Object output currently requires exactly one input file"
+                    ));
+                }
+
+                fs::copy(&object_files[0], &self.output).with_context(|| {
+                    format!("Failed to write object file to {}", self.output.display())
+                })?;
+            }
+
+            ResultType::Shared => {
+                println!("\x1b[1;34mLinking\x1b[0m shared library...");
+
+                linker::link_shared(&object_files, &self.output, &self.link_files)?;
+            }
+        }
 
         Ok(())
     }
 
-    pub fn run_ephemeral(
-        input: PathBuf,
-        include: Vec<PathBuf>,
-    ) -> Result<()> {
+    pub fn run_ephemeral(input: PathBuf, include: Vec<PathBuf>) -> Result<()> {
         let target_exe = if cfg!(target_os = "windows") {
             "ephemeral_run.exe"
         } else {
@@ -123,22 +142,19 @@ impl Pipeline {
             false,
             Vec::new(),
             include,
+            ResultType::Binary,
         )?;
 
         pipeline.compile()?;
 
-        println!(
-            "\x1b[1;34mExecuting\x1b[0m application binary loop..."
-        );
+        println!("\x1b[1;34mExecuting\x1b[0m application binary loop...");
 
-        let mut child = Command::new(target_exe)
-            .spawn()
-            .with_context(|| {
-                format!(
-                    "Failed to spawn native run instance execution handle at: {}",
-                    target_exe
-                )
-            })?;
+        let mut child = Command::new(target_exe).spawn().with_context(|| {
+            format!(
+                "Failed to spawn native run instance execution handle at: {}",
+                target_exe
+            )
+        })?;
 
         let exit_status = child.wait()?;
 
@@ -154,10 +170,7 @@ impl Pipeline {
         }
     }
 
-    pub fn check(
-        input: PathBuf,
-        include: Vec<PathBuf>,
-    ) -> Result<()> {
+    pub fn check(input: PathBuf, include: Vec<PathBuf>) -> Result<()> {
         let mut include_paths = include;
 
         if let Ok(packs_dir) = packages::get_packs_dir() {
@@ -175,14 +188,8 @@ impl Pipeline {
         let compiler = packages::compiler_config()?;
         let target = compiler.target()?;
 
-        let ctx = CompilerCtx::new(
-            input,
-            &include_paths,
-            true,
-            target,
-        );
+        let ctx = CompilerCtx::new(input, &include_paths, true, target);
 
-        mysz_core::check_file(ctx)
-            .map_err(|e| anyhow!("{}", e))
+        mysz_core::check_file(ctx).map_err(|e| anyhow!("{}", e))
     }
 }

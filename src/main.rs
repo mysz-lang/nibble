@@ -1,12 +1,17 @@
 mod compiler;
+mod defaultfilename;
 mod linker;
+mod out;
 mod packages;
 
 use clap::{Parser, Subcommand};
-use std::fs::{create_dir, File};
+use std::fs::{File, create_dir};
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
+
+use crate::defaultfilename::get;
+use crate::out::ResultType;
 
 #[derive(Parser)]
 #[command(name = "nibble", version, author, about, long_about = None)]
@@ -33,8 +38,16 @@ enum Commands {
         #[arg(short = 'I', long = "include", value_name = "DIR")]
         include: Vec<PathBuf>,
 
-        #[arg(short, long, default_value = "main")]
+        #[arg(short = 'o', long = "output", default_value = "@")]
         output: PathBuf,
+
+        #[arg(
+            short = 'r',
+            long = "result",
+            value_name = "RESULT",
+            default_value = "binary"
+        )]
+        result: ResultType,
     },
 
     Run {
@@ -78,19 +91,32 @@ fn main() {
             noruntime,
             link_files,
             include,
-        } => compiler::Pipeline::new(
-            input,
-            output,
-            optimize,
-            noruntime,
-            link_files,
-            include,
-        )
-        .and_then(|pipeline| pipeline.compile()),
+            result,
+        } => {
+            let output: Result<PathBuf, anyhow::Error> = if output == PathBuf::from("@") {
+                if input.len() != 1 {
+                    Err(anyhow::anyhow!(
+                        "Cannot infer output filename when compiling multiple input files; use -o"
+                    ))
+                } else {
+                    input[0]
+                        .to_str()
+                        .ok_or_else(|| anyhow::anyhow!("Input filename is not valid UTF-8"))
+                        .map(|input| get(input, result).into())
+                }
+            } else {
+                Ok(output)
+            };
 
-        Commands::Run { input, include } => {
-            compiler::Pipeline::run_ephemeral(input, include)
+            output
+                .and_then(|output| {
+                    compiler::Pipeline::new(
+                        input, output, optimize, noruntime, link_files, include, result,
+                    )
+                })
+                .and_then(|pipeline| pipeline.compile())
         }
+        Commands::Run { input, include } => compiler::Pipeline::run_ephemeral(input, include),
 
         Commands::Install { package } => packages::install_package(
             &package,
