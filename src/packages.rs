@@ -76,7 +76,8 @@ pub fn get_packs_dir() -> Result<PathBuf> {
     Ok(home_dir.join(".nibble").join("packs"))
 }
 
-fn load_manifest() -> Result<Option<Manifest>> {
+// ---- Made public ----
+pub fn load_manifest() -> Result<Option<Manifest>> {
     let manifest_path = Path::new("nibble.toml");
 
     if !manifest_path.exists() {
@@ -96,6 +97,7 @@ fn load_manifest() -> Result<Option<Manifest>> {
 
     Ok(Some(manifest))
 }
+// ---------------------
 
 pub fn compiler_config() -> Result<CompilerConfig> {
     Ok(load_manifest()?

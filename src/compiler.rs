@@ -3,10 +3,13 @@ use crate::out::ResultType;
 use crate::packages;
 use anyhow::{Context, Result, anyhow};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{PathBuf};
 use std::process::Command;
 use tempfile::Builder;
 
+use mysz_core::athelp::ATBuilder;
+use mysz_core::compiler::{check_at, compile_at_graph};
+use mysz_core::utils::ats::{ATEntry, ATInfo};
 use mysz_core::utils::ctx::CompilerCtx;
 
 pub struct Pipeline {
@@ -18,6 +21,8 @@ pub struct Pipeline {
     include_paths: Vec<PathBuf>,
     compiler: packages::CompilerConfig,
     result: ResultType,
+    dependency_names: Vec<String>,      // names of dependencies for the main AT
+    dependency_ats: Vec<ATInfo>,        // ATs for packages
 }
 
 impl Pipeline {
@@ -37,7 +42,7 @@ impl Pipeline {
         let compiler = packages::compiler_config()?;
 
         if let Ok(packs_dir) = packages::get_packs_dir() {
-            include_paths.push(packs_dir);
+            include_paths.push(packs_dir.clone());
         }
 
         if include_paths.is_empty() {
@@ -46,6 +51,22 @@ impl Pipeline {
             }
 
             include_paths.push(PathBuf::from("."));
+        }
+
+        // Read dependencies from manifest.
+        let mut dependency_names = Vec::new();
+        let mut dependency_ats = Vec::new();
+        if let Some(manifest) = packages::load_manifest()? {
+            if let Some(deps) = manifest.dependencies {
+                for (name, _source) in deps {
+                    dependency_names.push(name.clone());
+                    if let Ok(at) = Self::build_package_at(&name) {
+                        dependency_ats.push(at);
+                    } else {
+                        eprintln!("Warning: could not build @'{}'", name);
+                    }
+                }
+            }
         }
 
         Ok(Self {
@@ -57,7 +78,70 @@ impl Pipeline {
             include_paths,
             compiler,
             result,
+            dependency_names,
+            dependency_ats,
         })
+    }
+
+    /// Build an ATInfo for a single file using ATBuilder.
+    fn build_at_from_file(
+        file_path: &PathBuf,
+        dependencies: Vec<String>,
+    ) -> Result<ATInfo, anyhow::Error> {
+        let name = file_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| anyhow!("Invalid file name: {}", file_path.display()))?
+            .to_string();
+        let root = file_path
+            .parent()
+            .ok_or_else(|| anyhow!("File has no parent directory: {}", file_path.display()))?
+            .to_path_buf();
+
+        let mut builder = ATBuilder::new()
+            .name(name.clone())
+            .root_dir(root)
+            .entry_file(file_path.clone())
+            .add_file(file_path.clone(), vec![name]);
+
+        for dep in dependencies {
+            builder = builder.add_dependency(dep, None);
+        }
+
+        builder
+            .build()
+            .map_err(|e| anyhow!("Failed to build @{}", e))
+    }
+
+    /// Build an ATInfo for a package (dependency) from the packs directory.
+    fn build_package_at(package_name: &str) -> Result<ATInfo, anyhow::Error> {
+        let packs_dir = packages::get_packs_dir()
+            .map_err(|e| anyhow!("Failed to get packs directory: {}", e))?;
+        let pkg_dir = packs_dir.join(package_name);
+
+        if !pkg_dir.exists() || !pkg_dir.is_dir() {
+            return Err(anyhow!(
+                "Package directory for '{}' does not exist at {:?}",
+                package_name,
+                pkg_dir
+            ));
+        }
+
+        let at = ATBuilder::new()
+            .name(package_name)
+            .root_dir(pkg_dir)
+            .discover_files()
+            .map_err(|e| {
+                anyhow!(
+                    "Failed to discover files for package '{}': {}",
+                    package_name,
+                    e
+                )
+            })?
+            .build()
+            .map_err(|e| anyhow!("Failed to build @{}: {}", package_name, e))?;
+
+        Ok(at)
     }
 
     pub fn compile(&self) -> Result<()> {
@@ -65,13 +149,23 @@ impl Pipeline {
 
         let mut object_files = Vec::new();
 
-        println!("\x1b[1;34mCompiling\x1b[0m targets with mysz-core engine...");
+        println!("\x1b[1;34mCompiling\x1b[0m targets...");
 
         for (i, input) in self.input.iter().enumerate() {
             let obj_path = tmp_dir.path().join(format!("{}.o", i));
 
-            let target = self.compiler.target()?;
+            // Build AT for the main input file, passing the dependency names.
+            let main_at = Self::build_at_from_file(input, self.dependency_names.clone())?;
 
+            let mut all_ats = vec![main_at];
+            all_ats.extend(self.dependency_ats.clone());
+
+            let entry = ATEntry {
+                info: 0,
+                is_current: true,
+            };
+
+            let target = self.compiler.target()?;
             let ctx = CompilerCtx::new(
                 input,
                 &self.include_paths,
@@ -79,13 +173,15 @@ impl Pipeline {
                 target,
             );
 
-            mysz_core::compile_file(
-                ctx,
+            compile_at_graph(
+                &ctx,
+                &all_ats,
+                &entry,
                 obj_path
                     .to_str()
                     .context("Temporary object path is not valid UTF-8")?,
             )
-            .map_err(|e| anyhow!("Mysz compiler core error:\n{}", e))?;
+            .map_err(|e| anyhow!("Mysz core error:\n{}", e))?;
 
             object_files.push(obj_path);
         }
@@ -188,8 +284,30 @@ impl Pipeline {
         let compiler = packages::compiler_config()?;
         let target = compiler.target()?;
 
-        let ctx = CompilerCtx::new(input, &include_paths, true, target);
+        // Read dependencies again for the check command.
+        let mut dependency_names = Vec::new();
+        let mut all_ats = Vec::new();
+        if let Some(manifest) = packages::load_manifest()? {
+            if let Some(deps) = manifest.dependencies {
+                for (name, _source) in deps {
+                    dependency_names.push(name.clone());
+                    if let Ok(at) = Self::build_package_at(&name) {
+                        all_ats.push(at);
+                    }
+                }
+            }
+        }
 
-        mysz_core::check_file(ctx).map_err(|e| anyhow!("{}", e))
+        let main_at = Self::build_at_from_file(&input, dependency_names)?;
+        all_ats.insert(0, main_at); // main AT first
+
+        let entry = ATEntry {
+            info: 0,
+            is_current: true,
+        };
+
+        let ctx = CompilerCtx::new(&input, &include_paths, true, target);
+
+        check_at(&ctx, &all_ats, &entry).map_err(|e| anyhow!("{}", e))
     }
 }
