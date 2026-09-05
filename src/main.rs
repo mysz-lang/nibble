@@ -83,6 +83,7 @@ fn main() {
 
     let mut outp = true;
 
+    #[allow(clippy::cmp_owned)]
     let result = match cli.command {
         Commands::Build {
             input,

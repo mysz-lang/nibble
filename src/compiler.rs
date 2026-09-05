@@ -3,7 +3,7 @@ use crate::out::ResultType;
 use crate::packages;
 use anyhow::{Context, Result, anyhow};
 use std::fs;
-use std::path::{PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use tempfile::Builder;
 
@@ -21,8 +21,8 @@ pub struct Pipeline {
     include_paths: Vec<PathBuf>,
     compiler: packages::CompilerConfig,
     result: ResultType,
-    dependency_names: Vec<String>,      // names of dependencies for the main AT
-    dependency_ats: Vec<ATInfo>,        // ATs for packages
+    dependency_names: Vec<String>, // names of dependencies for the main AT
+    dependency_ats: Vec<ATInfo>,   // ATs for packages
 }
 
 impl Pipeline {
@@ -56,15 +56,13 @@ impl Pipeline {
         // Read dependencies from manifest.
         let mut dependency_names = Vec::new();
         let mut dependency_ats = Vec::new();
-        if let Some(manifest) = packages::load_manifest()? {
-            if let Some(deps) = manifest.dependencies {
-                for (name, _source) in deps {
-                    dependency_names.push(name.clone());
-                    if let Ok(at) = Self::build_package_at(&name) {
-                        dependency_ats.push(at);
-                    } else {
-                        eprintln!("Warning: could not build @'{}'", name);
-                    }
+        if let Some(manifest) = packages::load_manifest()? && let Some(deps) = manifest.dependencies {
+            for (name, _source) in deps {
+                dependency_names.push(name.clone());
+                if let Ok(at) = Self::build_package_at(&name) {
+                    dependency_ats.push(at);
+                } else {
+                    eprintln!("Warning: could not build @'{}'", name);
                 }
             }
         }
@@ -85,7 +83,7 @@ impl Pipeline {
 
     /// Build an ATInfo for a single file using ATBuilder.
     fn build_at_from_file(
-        file_path: &PathBuf,
+        file_path: &Path,
         dependencies: Vec<String>,
     ) -> Result<ATInfo, anyhow::Error> {
         let name = file_path
@@ -101,8 +99,8 @@ impl Pipeline {
         let mut builder = ATBuilder::new()
             .name(name.clone())
             .root_dir(root)
-            .entry_file(file_path.clone())
-            .add_file(file_path.clone(), vec![name]);
+            .entry_file(file_path)
+            .add_file(file_path, vec![name]);
 
         for dep in dependencies {
             builder = builder.add_dependency(dep, None);
@@ -287,13 +285,11 @@ impl Pipeline {
         // Read dependencies again for the check command.
         let mut dependency_names = Vec::new();
         let mut all_ats = Vec::new();
-        if let Some(manifest) = packages::load_manifest()? {
-            if let Some(deps) = manifest.dependencies {
-                for (name, _source) in deps {
-                    dependency_names.push(name.clone());
-                    if let Ok(at) = Self::build_package_at(&name) {
-                        all_ats.push(at);
-                    }
+        if let Some(manifest) = packages::load_manifest()? && let Some(deps) = manifest.dependencies {
+            for (name, _source) in deps {
+                dependency_names.push(name.clone());
+                if let Ok(at) = Self::build_package_at(&name) {
+                    all_ats.push(at);
                 }
             }
         }
