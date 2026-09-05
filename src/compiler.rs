@@ -56,9 +56,7 @@ impl Pipeline {
         // Read dependencies from manifest.
         let mut dependency_names = Vec::new();
         let mut dependency_ats = Vec::new();
-        if let Some(manifest) = packages::load_manifest()?
-            && let Some(deps) = manifest.dependencies
-        {
+        if let Some(manifest) = packages::load_manifest()? && let Some(deps) = manifest.dependencies {
             for (name, _source) in deps {
                 dependency_names.push(name.clone());
                 if let Ok(at) = Self::build_package_at(&name) {
@@ -287,9 +285,7 @@ impl Pipeline {
         // Read dependencies again for the check command.
         let mut dependency_names = Vec::new();
         let mut all_ats = Vec::new();
-        if let Some(manifest) = packages::load_manifest()?
-            && let Some(deps) = manifest.dependencies
-        {
+        if let Some(manifest) = packages::load_manifest()? && let Some(deps) = manifest.dependencies {
             for (name, _source) in deps {
                 dependency_names.push(name.clone());
                 if let Ok(at) = Self::build_package_at(&name) {
