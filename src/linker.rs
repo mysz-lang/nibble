@@ -129,15 +129,15 @@ pub fn link_shared(obj_paths: &[PathBuf], output: &Path, link_files: &[PathBuf])
 }
 
 fn create_output_parent(output: &Path) -> Result<()> {
-    if let Some(parent) = output.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!(
-                    "Failed to create output destination directory: {:?}",
-                    parent
-                )
-            })?;
-        }
+    if let Some(parent) = output.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "Failed to create output destination directory: {:?}",
+                parent
+            )
+        })?;
     }
 
     Ok(())
