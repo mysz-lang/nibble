@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -6,8 +6,21 @@ use std::process::Command;
 const RUNTIME_VERSION: &str = "0.3.5";
 const REPO_URL: &str = "https://raw.githubusercontent.com/mysz-lang/mysz-runtime/main/binary";
 
+fn host_compiler() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        "clang"
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        "cc"
+    }
+}
+
 fn fetch_runtime() -> Result<PathBuf> {
     let home_dir = dirs::home_dir().context("Could not find user home directory")?;
+
     let cache_dir = home_dir.join(".nibble").join("cache").join(RUNTIME_VERSION);
 
     let lib_name = "libmysz-runtime.a";
@@ -20,6 +33,7 @@ fn fetch_runtime() -> Result<PathBuf> {
     fs::create_dir_all(&cache_dir).context("Failed to create runtime cache directory")?;
 
     let archive_name = format!("libmysz-runtime.{}.tar.gz", RUNTIME_VERSION);
+
     let download_url = format!("{}/{}", REPO_URL, archive_name);
 
     println!(
@@ -39,6 +53,7 @@ fn fetch_runtime() -> Result<PathBuf> {
 
     let tar_gz = flate2::read::GzDecoder::new(response);
     let mut archive = tar::Archive::new(tar_gz);
+
     archive
         .unpack(&cache_dir)
         .context("Corrupt compression framework encountered while unpacking runtime tarball")?;
@@ -59,17 +74,7 @@ pub fn link_binary(
     noruntime: bool,
     link_files: &[PathBuf],
 ) -> Result<()> {
-    // CRITICAL FIX: Ensure the target output directory exists before generating output files
-    if let Some(parent) = output_exe.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!(
-                    "Failed to create output binary destination layout at path: {:?}",
-                    parent
-                )
-            })?;
-        }
-    }
+    create_output_parent(output_exe)?;
 
     let mut args = Vec::new();
 
@@ -77,18 +82,14 @@ pub fn link_binary(
         args.push(obj.to_string_lossy().into_owned());
     }
 
-    let temp_runtime = "nibble_runtime.c";
-
     if !noruntime {
         let runtime_lib_path = fetch_runtime().context("Runtime layer alignment failed")?;
+
         args.push(runtime_lib_path.to_string_lossy().into_owned());
     }
 
     for file in link_files {
         if !file.exists() {
-            if !noruntime {
-                let _ = fs::remove_file(temp_runtime);
-            }
             return Err(anyhow!("Link parameter target path not found: {:?}", file));
         }
 
@@ -98,27 +99,68 @@ pub fn link_binary(
     args.push("-o".into());
     args.push(output_exe.to_string_lossy().into_owned());
 
-    #[cfg(target_os = "windows")]
-    let compiler = "clang";
-    #[cfg(not(target_os = "windows"))]
-    let compiler = "cc";
+    run_linker(&args)
+}
+
+pub fn link_shared(obj_paths: &[PathBuf], output: &Path, link_files: &[PathBuf]) -> Result<()> {
+    create_output_parent(output)?;
+
+    let mut args = Vec::new();
+
+    // Produce a real ELF shared object.
+    args.push("-shared".into());
+
+    for obj in obj_paths {
+        args.push(obj.to_string_lossy().into_owned());
+    }
+
+    for file in link_files {
+        if !file.exists() {
+            return Err(anyhow!("Link parameter target path not found: {:?}", file));
+        }
+
+        args.push(file.to_string_lossy().into_owned());
+    }
+
+    args.push("-o".into());
+    args.push(output.to_string_lossy().into_owned());
+
+    run_linker(&args)
+}
+
+fn create_output_parent(output: &Path) -> Result<()> {
+    if let Some(parent) = output.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Failed to create output destination directory: {:?}",
+                    parent
+                )
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
+fn run_linker(args: &[String]) -> Result<()> {
+    let compiler = host_compiler();
 
     let output = Command::new(compiler)
-        .args(&args)
+        .args(args)
         .output()
-        .with_context(|| format!("Platform system linker failed execution. Verify '{}' is installed and added to your path environment variables.", compiler))?;
-
-    if !noruntime {
-        let _ = fs::remove_file(temp_runtime);
-    }
+        .with_context(|| {
+            format!(
+                "Platform linker failed to execute. Verify '{}' is installed and available in PATH.",
+                compiler
+            )
+        })?;
 
     if output.status.success() {
         Ok(())
     } else {
         let stderr_msg = String::from_utf8_lossy(&output.stderr);
-        Err(anyhow!(
-            "Compilation phase interrupted by host platform compiler linkage pipeline:\n{}",
-            stderr_msg
-        ))
+
+        Err(anyhow!("Host platform linker failed:\n{}", stderr_msg))
     }
 }
