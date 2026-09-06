@@ -6,21 +6,28 @@ use std::process::Command;
 
 const RUNTIME_REPO: &str = "mysz-lang/mysz-runtime";
 const RUNTIME_BINARY_DIR: &str = "binary";
+const PLATFORM_RUNTIME_VERSION: (u32, u32, u32) = (0, 5, 0);
 
 fn host_compiler() -> &'static str {
+    "clang"
+}
+
+fn runtime_machine() -> &'static str {
     #[cfg(target_os = "windows")]
     {
-        "clang"
+        "win"
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        "cc"
+        "pos"
     }
 }
 
 fn runtime_cache_root() -> Result<PathBuf> {
-    let home_dir = dirs::home_dir().context("Could not find user home directory")?;
+    let home_dir = dirs::home_dir()
+        .context("Could not find user home directory")?;
+
     Ok(home_dir.join(".nibble").join("cache"))
 }
 
@@ -30,20 +37,33 @@ struct GithubContentEntry {
     download_url: Option<String>,
 }
 
-fn parse_runtime_filename(name: &str) -> Option<(u32, u32, u32)> {
-    let stripped = name
-        .strip_prefix("libmysz-runtime.")?
-        .strip_suffix(".tar.gz")?;
+fn parse_runtime_filename(
+    name: &str,
+) -> Option<((u32, u32, u32), Option<&str>)> {
+    let (version, machine) = if let Some(version) =
+        name.strip_prefix("libmysz-runtime.")
+    {
+        (version, None)
+    } else {
+        let stripped = name.strip_prefix("libmysz-runtime_")?;
+        let (machine, version) = stripped.split_once('.')?;
 
-    let mut parts = stripped.split('.');
+        (version, Some(machine))
+    };
+
+    let version = version.strip_suffix(".tar.gz")?;
+
+    let mut parts = version.split('.');
+
     let major: u32 = parts.next()?.parse().ok()?;
     let minor: u32 = parts.next()?.parse().ok()?;
     let patch: u32 = parts.next()?.parse().ok()?;
+
     if parts.next().is_some() {
         return None;
     }
 
-    Some((major, minor, patch))
+    Some(((major, minor, patch), machine))
 }
 
 fn version_string(v: (u32, u32, u32)) -> String {
@@ -60,7 +80,9 @@ fn resolve_latest_runtime() -> Result<((u32, u32, u32), String)> {
         .get(&api_url)
         .header("User-Agent", "nibble-cli")
         .send()
-        .context("Failed to reach GitHub API while resolving the latest mysz-runtime version")?;
+        .context(
+            "Failed to reach GitHub API while resolving the latest mysz-runtime version",
+        )?;
 
     if !response.status().is_success() {
         return Err(anyhow!(
@@ -71,47 +93,91 @@ fn resolve_latest_runtime() -> Result<((u32, u32, u32), String)> {
 
     let entries: Vec<GithubContentEntry> = response
         .json()
-        .context("Failed to parse GitHub API response for mysz-runtime binaries")?;
+        .context(
+            "Failed to parse GitHub API response for mysz-runtime binaries",
+        )?;
+
+    let machine = runtime_machine();
 
     let best = entries
         .iter()
-        .filter_map(|e| parse_runtime_filename(&e.name).map(|v| (v, e)))
-        .max_by_key(|(v, _)| *v)
-        .ok_or_else(|| anyhow!("No libmysz-runtime.*.tar.gz files found in the runtime repo"))?;
+        .filter_map(|entry| {
+            let (version, entry_machine) =
+                parse_runtime_filename(&entry.name)?;
+
+            if version < PLATFORM_RUNTIME_VERSION {
+                // Before 0.5.0, only the old platform-independent
+                // filename is valid.
+                if entry_machine.is_some() {
+                    return None;
+                }
+            } else {
+                // From 0.5.0 onwards, only the current platform's
+                // runtime is valid.
+                if entry_machine != Some(machine) {
+                    return None;
+                }
+            }
+
+            Some((version, entry))
+        })
+        .max_by_key(|(version, _)| *version)
+        .ok_or_else(|| {
+            anyhow!(
+                "No compatible libmysz-runtime binaries found for platform '{}'",
+                machine
+            )
+        })?;
 
     let (version, entry) = best;
+
     let download_url = entry
         .download_url
         .clone()
-        .ok_or_else(|| anyhow!("Runtime archive entry has no download_url"))?;
+        .ok_or_else(|| {
+            anyhow!("Runtime archive entry has no download_url")
+        })?;
 
     Ok((version, download_url))
 }
 
-fn highest_cached_runtime(cache_root: &Path) -> Option<(u32, u32, u32)> {
+fn highest_cached_runtime(
+    cache_root: &Path,
+) -> Option<(u32, u32, u32)> {
     let entries = fs::read_dir(cache_root).ok()?;
 
     entries
         .filter_map(|e| e.ok())
-        .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+        .filter_map(|e| {
+            e.file_name()
+                .to_str()
+                .map(|s| s.to_string())
+        })
         .filter_map(|name| {
             let mut parts = name.split('.');
+
             let major: u32 = parts.next()?.parse().ok()?;
             let minor: u32 = parts.next()?.parse().ok()?;
             let patch: u32 = parts.next()?.parse().ok()?;
+
             if parts.next().is_some() {
                 return None;
             }
+
             Some((major, minor, patch))
         })
         .max()
 }
 
-fn download_runtime_archive(download_url: &str, cache_dir: &Path) -> Result<PathBuf> {
+fn download_runtime_archive(
+    download_url: &str,
+    cache_dir: &Path,
+) -> Result<PathBuf> {
     let lib_name = "libmysz-runtime.a";
     let target_lib_path = cache_dir.join(lib_name);
 
-    fs::create_dir_all(cache_dir).context("Failed to create runtime cache directory")?;
+    fs::create_dir_all(cache_dir)
+        .context("Failed to create runtime cache directory")?;
 
     println!(
         "\x1b[1;36mDownloading\x1b[0m mysz-runtime from {}...",
@@ -119,7 +185,9 @@ fn download_runtime_archive(download_url: &str, cache_dir: &Path) -> Result<Path
     );
 
     let response = reqwest::blocking::get(download_url)
-        .context("Connection failed while downloading the mysz-runtime archive")?;
+        .context(
+            "Connection failed while downloading the mysz-runtime archive",
+        )?;
 
     if !response.status().is_success() {
         return Err(anyhow!(
@@ -133,7 +201,9 @@ fn download_runtime_archive(download_url: &str, cache_dir: &Path) -> Result<Path
 
     archive
         .unpack(cache_dir)
-        .context("Corrupt compression framework encountered while unpacking runtime tarball")?;
+        .context(
+            "Corrupt compression framework encountered while unpacking runtime tarball",
+        )?;
 
     if !target_lib_path.exists() {
         return Err(anyhow!(
@@ -147,30 +217,46 @@ fn download_runtime_archive(download_url: &str, cache_dir: &Path) -> Result<Path
 
 fn fetch_runtime() -> Result<PathBuf> {
     let cache_root = runtime_cache_root()?;
+    let machine = runtime_machine();
 
     match resolve_latest_runtime() {
         Ok((version, download_url)) => {
-            let cache_dir = cache_root.join(version_string(version));
+            let cache_dir = cache_root
+                .join(machine)
+                .join(version_string(version));
+
             let target_lib_path = cache_dir.join("libmysz-runtime.a");
 
             if target_lib_path.exists() {
                 return Ok(target_lib_path);
             }
 
-            download_runtime_archive(&download_url, &cache_dir)
+            download_runtime_archive(
+                &download_url,
+                &cache_dir,
+            )
         }
+
         Err(resolve_err) => {
-            if let Some(cached_version) = highest_cached_runtime(&cache_root) {
+            let machine_cache = cache_root.join(machine);
+
+            if let Some(cached_version) =
+                highest_cached_runtime(&machine_cache)
+            {
                 eprintln!(
                     "\x1b[1;33mWarning:\x1b[0m could not resolve the latest mysz-runtime ({}), using cached v{}",
                     resolve_err,
                     version_string(cached_version)
                 );
-                let cache_dir = cache_root.join(version_string(cached_version));
+
+                let cache_dir = machine_cache
+                    .join(version_string(cached_version));
+
                 Ok(cache_dir.join("libmysz-runtime.a"))
             } else {
-                Err(resolve_err
-                    .context("and no cached mysz-runtime is available locally to fall back on"))
+                Err(resolve_err.context(
+                    "and no cached mysz-runtime is available locally to fall back on",
+                ))
             }
         }
     }
@@ -191,26 +277,42 @@ pub fn link_binary(
     }
 
     if !noruntime {
-        let runtime_lib_path = fetch_runtime().context("Runtime layer alignment failed")?;
+        let runtime_lib_path = fetch_runtime()
+            .context("Runtime layer alignment failed")?;
 
-        args.push(runtime_lib_path.to_string_lossy().into_owned());
+        args.push(
+            runtime_lib_path
+                .to_string_lossy()
+                .into_owned(),
+        );
     }
 
     for file in link_files {
         if !file.exists() {
-            return Err(anyhow!("Link parameter target path not found: {:?}", file));
+            return Err(anyhow!(
+                "Link parameter target path not found: {:?}",
+                file
+            ));
         }
 
         args.push(file.to_string_lossy().into_owned());
     }
 
     args.push("-o".into());
-    args.push(output_exe.to_string_lossy().into_owned());
+    args.push(
+        output_exe
+            .to_string_lossy()
+            .into_owned(),
+    );
 
     run_linker(&args)
 }
 
-pub fn link_shared(obj_paths: &[PathBuf], output: &Path, link_files: &[PathBuf]) -> Result<()> {
+pub fn link_shared(
+    obj_paths: &[PathBuf],
+    output: &Path,
+    link_files: &[PathBuf],
+) -> Result<()> {
     create_output_parent(output)?;
 
     let mut args = Vec::new();
@@ -223,14 +325,21 @@ pub fn link_shared(obj_paths: &[PathBuf], output: &Path, link_files: &[PathBuf])
 
     for file in link_files {
         if !file.exists() {
-            return Err(anyhow!("Link parameter target path not found: {:?}", file));
+            return Err(anyhow!(
+                "Link parameter target path not found: {:?}",
+                file
+            ));
         }
 
         args.push(file.to_string_lossy().into_owned());
     }
 
     args.push("-o".into());
-    args.push(output.to_string_lossy().into_owned());
+    args.push(
+        output
+            .to_string_lossy()
+            .into_owned(),
+    );
 
     run_linker(&args)
 }
@@ -239,12 +348,13 @@ fn create_output_parent(output: &Path) -> Result<()> {
     if let Some(parent) = output.parent()
         && !parent.as_os_str().is_empty()
     {
-        fs::create_dir_all(parent).with_context(|| {
-            format!(
-                "Failed to create output destination directory: {:?}",
-                parent
-            )
-        })?;
+        fs::create_dir_all(parent)
+            .with_context(|| {
+                format!(
+                    "Failed to create output destination directory: {:?}",
+                    parent
+                )
+            })?;
     }
 
     Ok(())
@@ -266,8 +376,12 @@ fn run_linker(args: &[String]) -> Result<()> {
     if output.status.success() {
         Ok(())
     } else {
-        let stderr_msg = String::from_utf8_lossy(&output.stderr);
+        let stderr_msg =
+            String::from_utf8_lossy(&output.stderr);
 
-        Err(anyhow!("Host platform linker failed:\n{}", stderr_msg))
+        Err(anyhow!(
+            "Host platform linker failed:\n{}",
+            stderr_msg
+        ))
     }
 }
