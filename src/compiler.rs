@@ -52,7 +52,7 @@ impl Pipeline {
                     dependency_ats.push(at);
                     include_paths.push(comppath);
                 }
-                Err(e) => eprintln!("Warning: could not build @'{}': {}", dep.alias, e),
+                Err(e) => eprintln!("Warning: could not build @{}: {}", dep.alias, e),
             }
         }
 
@@ -163,7 +163,7 @@ impl Pipeline {
 
         if !pkg_dir.exists() || !pkg_dir.is_dir() {
             return Err(anyhow!(
-                "Package directory for '{}' does not exist at {:?} (dependency resolution ran but produced nothing?)",
+                "Package directory for '{}' does not exist at {:?} (@ resolution ran but produced nothing?)",
                 dep.alias,
                 pkg_dir
             ));
@@ -221,7 +221,7 @@ impl Pipeline {
         let obj_path = obj_dir.join("out.o");
 
         println!(
-            "\x1b[1;34mCompiling\x1b[0m project '{}'...",
+            "\x1b[1;34mCompiling\x1b[0m @{}...",
             self.at_metadata.name
         );
 
@@ -343,7 +343,7 @@ impl Pipeline {
                     all_ats.push(at);
                     include_paths.push(comppath);
                 }
-                Err(e) => eprintln!("Warning: could not build @'{}': {}", dep.alias, e),
+                Err(e) => eprintln!("Warning: could not build @{}: {}", dep.alias, e),
             }
         }
 

@@ -20,7 +20,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Build the project in the current directory (requires manifest.nibble).
+    /// Build the @ in the current directory
     Build {
         #[arg(short = 'O', long)]
         optimize: bool,
@@ -46,24 +46,22 @@ enum Commands {
         result: ResultType,
     },
 
-    /// Build and immediately run the project in the current directory
-    /// (requires manifest.nibble).
+    /// Build and immediately run the @ in the current directory.
     Run {
         #[arg(short = 'I', long = "include", value_name = "DIR")]
         include: Vec<PathBuf>,
     },
 
+    /// List all @s in the project and show which are not cached.
     List {},
 
-    /// Type-check the project in the current directory without producing
-    /// output (requires manifest.nibble).
+    /// Type-check the @ in the current directory without producing output.
     Check {
         #[arg(short = 'I', long = "include", value_name = "DIR")]
         include: Vec<PathBuf>,
     },
 
-    /// Add a dependency to manifest.nibble. This only edits the manifest —
-    /// the actual fetch happens on the next build/run/check.
+    /// Add an @ dependency to manifest.nibble.
     Install {
         #[arg(value_name = "ALIAS")]
         alias: String,
@@ -74,14 +72,18 @@ enum Commands {
         #[arg(long = "version", value_name = "VERSION")]
         version: Option<String>,
 
-        #[arg(long = "source", value_name = "URL")]
+        #[arg(long = "source", value_name = "SOURCE")]
         source: Option<String>,
     },
 
+    /// Initialise a new Mysz @ project.
     Init {
-        #[arg(value_name = "project name")]
+        #[arg(value_name = "PROJECT_NAME")]
         projname: Option<String>,
     },
+
+    /// Remove all generated Nibble output and cached @s.
+    Clean,
 }
 
 fn main() {
@@ -98,8 +100,15 @@ fn main() {
             include,
             output,
             result,
-        } => compiler::Pipeline::new(output, optimize, noruntime, link_files, include, result)
-            .and_then(|pipeline| pipeline.compile()),
+        } => compiler::Pipeline::new(
+            output,
+            optimize,
+            noruntime,
+            link_files,
+            include,
+            result,
+        )
+        .and_then(|pipeline| pipeline.compile()),
 
         Commands::Run { include } => compiler::Pipeline::run_ephemeral(include),
 
@@ -115,6 +124,7 @@ fn main() {
                 version,
                 source,
             };
+
             packages::add_dependency_to_manifest(&dep)
         }
 
@@ -128,6 +138,10 @@ fn main() {
         Commands::Check { include } => {
             outp = false;
             compiler::Pipeline::check(include)
+        }
+
+        Commands::Clean => {
+            packages::clean()
         }
     };
 
@@ -155,15 +169,16 @@ fn initialise(projname: Option<String>) -> Result<(), anyhow::Error> {
         create_dir(&base_dir)?;
         projname.clone()
     } else {
-        // No name given: initialising in the current directory, so derive
-        // the project name from the directory itself.
         std::env::current_dir()
             .ok()
             .and_then(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()))
             .unwrap_or_else(|| "main".to_string())
     };
 
-    let mut mainmysz = File::create(base_dir.join("main.mysz"))?;
+    let src_dir = base_dir.join("src");
+    std::fs::create_dir_all(&src_dir)?;
+
+    let mut mainmysz = File::create(src_dir.join("main.mysz"))?;
     let mut manifest = File::create(base_dir.join("manifest.nibble"))?;
     let mut gitignore = File::create(base_dir.join(".gitignore"))?;
 
@@ -177,7 +192,8 @@ fn pub main(): int {
     mainmysz.write_all(mainmysz_content.as_bytes())?;
 
     let manifest_content = format!(
-        r#"at name="{name}" entry="main.mysz" version="0.1.0" description="" {{
+        r#"at name="{name}" entry="src/main.mysz" version="0.1.0" description="" {{
+    author ""
 }}
 
 compiler {{
