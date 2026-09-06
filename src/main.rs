@@ -1,5 +1,4 @@
 mod compiler;
-mod defaultfilename;
 mod linker;
 mod out;
 mod packages;
@@ -10,7 +9,6 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::defaultfilename::get;
 use crate::out::ResultType;
 
 #[derive(Parser)]
@@ -22,10 +20,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Build the project in the current directory (requires manifest.nibble).
     Build {
-        #[arg(value_name = "FILE")]
-        input: Vec<PathBuf>,
-
         #[arg(short = 'O', long)]
         optimize: bool,
 
@@ -38,8 +34,8 @@ enum Commands {
         #[arg(short = 'I', long = "include", value_name = "DIR")]
         include: Vec<PathBuf>,
 
-        #[arg(short = 'o', long = "output", default_value = "@")]
-        output: PathBuf,
+        #[arg(short = 'o', long = "output")]
+        output: Option<PathBuf>,
 
         #[arg(
             short = 'r',
@@ -50,25 +46,36 @@ enum Commands {
         result: ResultType,
     },
 
+    /// Build and immediately run the project in the current directory
+    /// (requires manifest.nibble).
     Run {
-        #[arg(value_name = "FILE")]
-        input: PathBuf,
-
         #[arg(short = 'I', long = "include", value_name = "DIR")]
         include: Vec<PathBuf>,
     },
 
+    List {},
+
+    /// Type-check the project in the current directory without producing
+    /// output (requires manifest.nibble).
     Check {
-        #[arg(value_name = "FILE")]
-        input: PathBuf,
-
         #[arg(short = 'I', long = "include", value_name = "DIR")]
         include: Vec<PathBuf>,
     },
 
+    /// Add a dependency to manifest.nibble. This only edits the manifest —
+    /// the actual fetch happens on the next build/run/check.
     Install {
-        #[arg(value_name = "PACK_NAME")]
-        package: String,
+        #[arg(value_name = "ALIAS")]
+        alias: String,
+
+        #[arg(long = "at", value_name = "AT_NAME")]
+        at: Option<String>,
+
+        #[arg(long = "version", value_name = "VERSION")]
+        version: Option<String>,
+
+        #[arg(long = "source", value_name = "URL")]
+        source: Option<String>,
     },
 
     Init {
@@ -83,52 +90,44 @@ fn main() {
 
     let mut outp = true;
 
-    #[allow(clippy::cmp_owned)]
     let result = match cli.command {
         Commands::Build {
-            input,
-            output,
             optimize,
             noruntime,
             link_files,
             include,
+            output,
             result,
+        } => compiler::Pipeline::new(output, optimize, noruntime, link_files, include, result)
+            .and_then(|pipeline| pipeline.compile()),
+
+        Commands::Run { include } => compiler::Pipeline::run_ephemeral(include),
+
+        Commands::Install {
+            alias,
+            at,
+            version,
+            source,
         } => {
-            let output: Result<PathBuf, anyhow::Error> = if output == PathBuf::from("@") {
-                if input.len() != 1 {
-                    Err(anyhow::anyhow!(
-                        "Cannot infer output filename when compiling multiple input files; use -o"
-                    ))
-                } else {
-                    input[0]
-                        .to_str()
-                        .ok_or_else(|| anyhow::anyhow!("Input filename is not valid UTF-8"))
-                        .map(|input| get(input, result).into())
-                }
-            } else {
-                Ok(output)
+            let dep = packages::Dependency {
+                at: at.unwrap_or_else(|| alias.clone()),
+                alias,
+                version,
+                source,
             };
-
-            output
-                .and_then(|output| {
-                    compiler::Pipeline::new(
-                        input, output, optimize, noruntime, link_files, include, result,
-                    )
-                })
-                .and_then(|pipeline| pipeline.compile())
+            packages::add_dependency_to_manifest(&dep)
         }
-        Commands::Run { input, include } => compiler::Pipeline::run_ephemeral(input, include),
 
-        Commands::Install { package } => packages::install_package(
-            &package,
-            &packages::DependencySource::Named(package.clone()),
-        ),
+        Commands::List {} => {
+            outp = false;
+            packages::list()
+        }
 
         Commands::Init { projname } => initialise(projname),
 
-        Commands::Check { input, include } => {
+        Commands::Check { include } => {
             outp = false;
-            compiler::Pipeline::check(input, include)
+            compiler::Pipeline::check(include)
         }
     };
 
@@ -151,32 +150,49 @@ fn main() {
 fn initialise(projname: Option<String>) -> Result<(), anyhow::Error> {
     let mut base_dir = PathBuf::from(".");
 
-    if let Some(projname) = projname {
+    let name = if let Some(projname) = &projname {
         base_dir.push(projname);
         create_dir(&base_dir)?;
-    }
+        projname.clone()
+    } else {
+        // No name given: initialising in the current directory, so derive
+        // the project name from the directory itself.
+        std::env::current_dir()
+            .ok()
+            .and_then(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| "main".to_string())
+    };
 
     let mut mainmysz = File::create(base_dir.join("main.mysz"))?;
-    let mut nibbletoml = File::create(base_dir.join("nibble.toml"))?;
+    let mut manifest = File::create(base_dir.join("manifest.nibble"))?;
+    let mut gitignore = File::create(base_dir.join(".gitignore"))?;
 
     let mainmysz_content = r#"use std::io;
 
 fn pub main(): int {
-    str_print("Hello, world!");
+    println("Hello, world!");
     return 0;
 };"#;
 
     mainmysz.write_all(mainmysz_content.as_bytes())?;
 
-    let nibbletoml_content = r#"[compiler]
-target = "cranelift"
-output_json = false
+    let manifest_content = format!(
+        r#"at name="{name}" entry="main.mysz" version="0.1.0" description="" {{
+}}
 
-[dependencies]
-std = "std"
-"#;
+compiler {{
+    target "cranelift"
+}}
 
-    nibbletoml.write_all(nibbletoml_content.as_bytes())?;
+dependencies {{
+    std version="0.3.5"
+}}
+"#,
+        name = name,
+    );
+
+    manifest.write_all(manifest_content.as_bytes())?;
+    gitignore.write_all(packages::GITIGNORE_CONTENT.as_bytes())?;
 
     Ok(())
 }

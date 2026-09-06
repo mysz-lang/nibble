@@ -1,31 +1,33 @@
 use anyhow::{Context, Result, anyhow};
-use serde::Deserialize;
-use std::collections::HashMap;
+use kdl::{KdlDocument, KdlNode, KdlValue};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Deserialize, Debug, Clone)]
-#[serde(untagged)]
-pub enum DependencySource {
-    Named(String),
-    Custom {
-        source: String,
-        root_dir: String,
-        archive_prefix: Option<String>,
-    },
+pub fn nout_dir() -> PathBuf {
+    PathBuf::from("nout")
 }
 
-#[derive(Deserialize, Debug, Clone)]
+pub fn packs_dir() -> PathBuf {
+    nout_dir().join("packs")
+}
+
+pub fn build_dir() -> PathBuf {
+    nout_dir().join("build")
+}
+
+pub const GITIGNORE_CONTENT: &str = "# Nibble\nnout/\n";
+
+#[derive(Debug, Clone)]
 pub struct CompilerConfig {
-    #[serde(default = "default_target")]
     pub target: String,
-
-    #[serde(default)]
-    pub output_json: bool,
 }
 
-fn default_target() -> String {
-    "cranelift".to_string()
+impl Default for CompilerConfig {
+    fn default() -> Self {
+        Self {
+            target: "cranelift".to_string(),
+        }
+    }
 }
 
 impl CompilerConfig {
@@ -33,79 +35,509 @@ impl CompilerConfig {
         match self.target.to_lowercase().as_str() {
             "cranelift" => Ok(mysz_core::utils::ctx::CompilerTarget::Cranelift),
             "llvm" => Ok(mysz_core::utils::ctx::CompilerTarget::Llvm),
-            target => Err(anyhow!(
+            other => Err(anyhow!(
                 "Unknown compiler target '{}'. Expected 'cranelift' or 'llvm'",
-                target
+                other
             )),
         }
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct AtMetadata {
+    pub name: String,
+    pub entry: Option<String>,
+    pub version: String,
+    pub output: Option<String>,
+    pub description: Option<String>,
+    pub authors: Vec<String>,
+}
+
+impl AtMetadata {
+    pub fn output_name(&self) -> String {
+        self.output.clone().unwrap_or_else(|| self.name.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Dependency {
+    pub alias: String,
+    pub at: String,
+    pub version: Option<String>,
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Manifest {
-    pub compiler: Option<CompilerConfig>,
-    pub dependencies: Option<HashMap<String, DependencySource>>,
+    pub at: AtMetadata,
+    pub compiler: CompilerConfig,
+    pub dependencies: Vec<Dependency>,
 }
 
-#[derive(Clone)]
-struct PackageRegistryInfo {
-    tarball_url: String,
-    archive_prefix: String,
-    root_dir: String,
+fn kdl_str(value: &KdlValue) -> Option<String> {
+    value.as_string().map(|s| s.to_string())
 }
 
-fn get_default_registry() -> HashMap<&'static str, PackageRegistryInfo> {
-    let mut registry = HashMap::new();
-
-    registry.insert(
-        "std",
-        PackageRegistryInfo {
-            tarball_url: "https://github.com/mysz-lang/mysz-std/archive/refs/heads/main.tar.gz"
-                .to_string(),
-            archive_prefix: "mysz-std-main".to_string(),
-            root_dir: "src".to_string(),
-        },
-    );
-
-    registry
+fn optional_str_prop(node: &KdlNode, key: &str) -> Result<Option<String>> {
+    for entry in node.entries() {
+        if let Some(name) = entry.name()
+            && name.value() == key
+        {
+            return kdl_str(entry.value()).map(Some).ok_or_else(|| {
+                anyhow!(
+                    "'{}' on node '{}' must be a string",
+                    key,
+                    node.name().value()
+                )
+            });
+        }
+    }
+    Ok(None)
 }
 
-pub fn get_packs_dir() -> Result<PathBuf> {
-    let home_dir = dirs::home_dir().context("Could not find user home directory")?;
-
-    Ok(home_dir.join(".nibble").join("packs"))
+fn require_str_prop(node: &KdlNode, key: &str) -> Result<String> {
+    optional_str_prop(node, key)?.ok_or_else(|| {
+        anyhow!(
+            "Missing required '{}' attribute on node '{}'",
+            key,
+            node.name().value()
+        )
+    })
 }
 
-// ---- Made public ----
+fn ensure_known_props(node: &KdlNode, allowed: &[&str], allow_positional: bool) -> Result<()> {
+    for entry in node.entries() {
+        match entry.name() {
+            Some(name) => {
+                if !allowed.contains(&name.value()) {
+                    return Err(anyhow!(
+                        "Unknown attribute '{}' on node '{}' (expected one of: {})",
+                        name.value(),
+                        node.name().value(),
+                        allowed.join(", ")
+                    ));
+                }
+            }
+            None => {
+                if !allow_positional {
+                    return Err(anyhow!(
+                        "Unexpected positional value on node '{}'",
+                        node.name().value()
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_at_node(node: &KdlNode) -> Result<AtMetadata> {
+    const ALLOWED: &[&str] = &["name", "entry", "version", "output", "description"];
+    ensure_known_props(node, ALLOWED, false)?;
+
+    let name = require_str_prop(node, "name")?;
+    let entry = optional_str_prop(node, "entry")?;
+    let version = require_str_prop(node, "version")?;
+    let output = optional_str_prop(node, "output")?;
+    let description = optional_str_prop(node, "description")?;
+
+    let mut authors = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            match child.name().value() {
+                "author" => {
+                    ensure_known_props(child, &[], true)?;
+                    let mut entries = child.entries().iter();
+                    let value = entries.next().ok_or_else(|| {
+                        anyhow!("'author' node requires a name, e.g. author \"Someone\"")
+                    })?;
+                    if value.name().is_some() {
+                        return Err(anyhow!(
+                            "'author' expects a positional value, not a named attribute"
+                        ));
+                    }
+                    let author_name = kdl_str(value.value())
+                        .ok_or_else(|| anyhow!("'author' value must be a string"))?;
+                    authors.push(author_name);
+                }
+                other => {
+                    return Err(anyhow!(
+                        "Unknown child node '{}' under 'at' (expected 'author')",
+                        other
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(AtMetadata {
+        name,
+        entry,
+        version,
+        output,
+        description,
+        authors,
+    })
+}
+
+fn parse_compiler_node(node: &KdlNode) -> Result<CompilerConfig> {
+    const ALLOWED: &[&str] = &["target"];
+    ensure_known_props(node, ALLOWED, false)?;
+
+    let target = optional_str_prop(node, "target")?.unwrap_or_else(|| "cranelift".to_string());
+
+    Ok(CompilerConfig { target })
+}
+
+fn parse_dependency_node(node: &KdlNode) -> Result<Dependency> {
+    const ALLOWED: &[&str] = &["at", "version", "source"];
+    ensure_known_props(node, ALLOWED, false)?;
+
+    if node.children().is_some() {
+        return Err(anyhow!(
+            "Dependency '{}' has unexpected child nodes; dependencies are attribute-only",
+            node.name().value()
+        ));
+    }
+
+    let alias = node.name().value().to_string();
+    let at = optional_str_prop(node, "at")?.unwrap_or_else(|| alias.clone());
+    let version = optional_str_prop(node, "version")?;
+    let source = optional_str_prop(node, "source")?;
+
+    Ok(Dependency {
+        alias,
+        at,
+        version,
+        source,
+    })
+}
+
+fn parse_dependencies_node(node: &KdlNode) -> Result<Vec<Dependency>> {
+    ensure_known_props(node, &[], false)?;
+
+    let mut deps = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            deps.push(parse_dependency_node(child)?);
+        }
+    }
+    Ok(deps)
+}
+
+pub fn parse_manifest(text: &str) -> Result<Manifest> {
+    let doc: KdlDocument = text
+        .parse()
+        .map_err(|e| anyhow!("Failed to parse manifest.nibble: {}", e))?;
+
+    let mut at: Option<AtMetadata> = None;
+    let mut compiler = CompilerConfig::default();
+    let mut dependencies = Vec::new();
+
+    for node in doc.nodes() {
+        match node.name().value() {
+            "at" => {
+                if at.is_some() {
+                    return Err(anyhow!("Duplicate 'at' node in manifest.nibble"));
+                }
+                at = Some(parse_at_node(node)?);
+            }
+            "compiler" => {
+                compiler = parse_compiler_node(node)?;
+            }
+            "dependencies" => {
+                dependencies = parse_dependencies_node(node)?;
+            }
+            other => {
+                return Err(anyhow!(
+                    "Unknown top-level node '{}' in manifest.nibble (expected 'at', 'compiler', or 'dependencies')",
+                    other
+                ));
+            }
+        }
+    }
+
+    let at = at.ok_or_else(|| anyhow!("manifest.nibble is missing a required 'at' node"))?;
+
+    Ok(Manifest {
+        at,
+        compiler,
+        dependencies,
+    })
+}
+
+pub fn manifest_path() -> PathBuf {
+    PathBuf::from("manifest.nibble")
+}
+
 pub fn load_manifest() -> Result<Option<Manifest>> {
-    let manifest_path = Path::new("nibble.toml");
-
-    if !manifest_path.exists() {
+    let path = manifest_path();
+    if !path.exists() {
         return Ok(None);
     }
 
-    let content = fs::read_to_string(manifest_path).with_context(|| {
-        format!(
-            "Failed to read manifest file structure from {:?}",
-            manifest_path
-        )
-    })?;
+    let content =
+        fs::read_to_string(&path).with_context(|| format!("Failed to read {:?}", path))?;
 
-    let manifest: Manifest = toml::from_str(&content).context(
-        "Syntax or configuration error inside your local 'nibble.toml' manifest definition",
-    )?;
+    let manifest =
+        parse_manifest(&content).with_context(|| format!("Invalid manifest at {:?}", path))?;
 
     Ok(Some(manifest))
 }
-// ---------------------
 
-pub fn compiler_config() -> Result<CompilerConfig> {
-    Ok(load_manifest()?
-        .and_then(|manifest| manifest.compiler)
-        .unwrap_or_else(|| CompilerConfig {
-            target: "cranelift".to_string(),
-            output_json: false,
-        }))
+pub fn require_manifest() -> Result<Manifest> {
+    load_manifest()?.ok_or_else(|| {
+        anyhow!("No manifest.nibble found in the current directory. Run `nibble init` to create a new project.")
+    })
+}
+
+pub fn add_dependency_to_manifest(dep: &Dependency) -> Result<()> {
+    let path = manifest_path();
+    let content = fs::read_to_string(&path)
+        .with_context(|| format!("Failed to read {:?} — run `nibble init` first?", path))?;
+
+    let mut doc: KdlDocument = content
+        .parse()
+        .map_err(|e| anyhow!("Failed to parse manifest.nibble: {}", e))?;
+
+    parse_manifest(&content)?;
+
+    let mut new_dep_node = KdlNode::new(dep.alias.clone());
+    if dep.at != dep.alias {
+        new_dep_node.push(("at", dep.at.clone()));
+    }
+    if let Some(version) = &dep.version {
+        new_dep_node.push(("version", version.clone()));
+    }
+    if let Some(source) = &dep.source {
+        new_dep_node.push(("source", source.clone()));
+    }
+
+    let deps_node_idx = doc
+        .nodes()
+        .iter()
+        .position(|n| n.name().value() == "dependencies");
+
+    match deps_node_idx {
+        Some(idx) => {
+            let deps_node = &mut doc.nodes_mut()[idx];
+            let children = deps_node
+                .children_mut()
+                .get_or_insert_with(KdlDocument::new);
+
+            if let Some(existing_idx) = children
+                .nodes()
+                .iter()
+                .position(|n| n.name().value() == dep.alias)
+            {
+                children.nodes_mut()[existing_idx] = new_dep_node;
+            } else {
+                children.nodes_mut().push(new_dep_node);
+            }
+        }
+        None => {
+            let mut deps_node = KdlNode::new("dependencies");
+            let mut children = KdlDocument::new();
+            children.nodes_mut().push(new_dep_node);
+            deps_node.set_children(children);
+            doc.nodes_mut().push(deps_node);
+        }
+    }
+
+    fs::write(&path, doc.to_string()).with_context(|| format!("Failed to write {:?}", path))?;
+
+    Ok(())
+}
+
+/// name -> "owner/repo" on GitHub.
+/// every fetched AT is now expected to carry its own manifest.nibble describing its own layout.
+fn default_registry() -> std::collections::HashMap<&'static str, &'static str> {
+    let mut registry = std::collections::HashMap::new();
+    registry.insert("std", "mysz-lang/mysz-std");
+    registry
+}
+
+fn source_to_tarball_url(source: &str, version: &str) -> Result<String> {
+    if let Some(repo) = source.strip_prefix("github:") {
+        let repo = repo.trim_matches('/');
+
+        if !repo.contains('/') {
+            return Err(anyhow!(
+                "Invalid GitHub source '{}': expected github:owner/repo",
+                source
+            ));
+        }
+
+        return Ok(format!(
+            "https://github.com/{}/archive/refs/tags/{}.tar.gz",
+            repo, version
+        ));
+    }
+
+    if let Some(repo) = source.strip_prefix("gitlab:") {
+        let repo = repo.trim_matches('/');
+
+        if !repo.contains('/') {
+            return Err(anyhow!(
+                "Invalid GitLab source '{}': expected gitlab:owner/repo",
+                source
+            ));
+        }
+
+        return Ok(format!(
+            "https://gitlab.com/{}/-/archive/{}/source-{}.tar.gz",
+            repo, version, version
+        ));
+    }
+
+    Ok(source.replace("{version}", version))
+}
+
+fn resolve_tarball_url(dep: &Dependency) -> Result<String> {
+    if let Some(source) = &dep.source {
+        return source_to_tarball_url(source, dep.version.as_deref().unwrap_or("main"));
+    }
+
+    let registry = default_registry();
+
+    let repo = registry.get(dep.at.as_str()).ok_or_else(|| {
+        anyhow!(
+            "'{}' is not in the default registry and has no explicit 'source'",
+            dep.at
+        )
+    })?;
+
+    match &dep.version {
+        Some(version) => Ok(format!(
+            "https://github.com/{}/archive/refs/tags/{}.tar.gz",
+            repo, version
+        )),
+        None => Ok(format!(
+            "https://github.com/{}/archive/refs/heads/main.tar.gz",
+            repo
+        )),
+    }
+}
+
+pub fn install_dependency(dep: &Dependency) -> Result<()> {
+    let target_dir = packs_dir().join(&dep.alias);
+
+    if target_dir.exists() && fs::read_dir(&target_dir)?.next().is_some() {
+        return Ok(());
+    }
+
+    let url = resolve_tarball_url(dep)?;
+
+    println!(
+        "\x1b[1;36mDownloading\x1b[0m dependency '{}' ({})...",
+        dep.alias, dep.at
+    );
+
+    let response = reqwest::blocking::get(&url).with_context(|| {
+        format!(
+            "Network connection failed while fetching dependency '{}'. Check your internet access.",
+            dep.alias
+        )
+    })?;
+
+    if !response.status().is_success() {
+        return Err(anyhow!(
+            "Failed to fetch dependency '{}': server returned status {}",
+            dep.alias,
+            response.status()
+        ));
+    }
+
+    let tar_gz = flate2::read::GzDecoder::new(response);
+    let mut archive = tar::Archive::new(tar_gz);
+
+    fs::create_dir_all(&target_dir)
+        .with_context(|| format!("Failed to create {:?}", target_dir))?;
+
+    let mut extracted_count = 0;
+
+    for entry_result in archive
+        .entries()
+        .context("Failed to read tarball entries")?
+    {
+        let mut entry = entry_result.context("Corrupt entry in downloaded archive")?;
+        let path = entry.path().context("Entry has no path")?.to_path_buf();
+
+        let mut components = path.components();
+        if components.next().is_none() {
+            continue;
+        }
+
+        let rest: PathBuf = components.collect();
+        if rest.as_os_str().is_empty() {
+            continue;
+        }
+
+        let out_path = target_dir.join(&rest);
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent)
+                .context("Failed to create directory while extracting dependency")?;
+        }
+
+        if entry.header().entry_type().is_file() {
+            entry
+                .unpack(&out_path)
+                .with_context(|| format!("Failed to extract {:?}", out_path))?;
+            extracted_count += 1;
+        }
+    }
+
+    if extracted_count == 0 {
+        return Err(anyhow!(
+            "Downloaded archive for '{}' contained no files",
+            dep.alias
+        ));
+    }
+
+    verify_fetched_manifest(dep, &target_dir)?;
+
+    println!(
+        "\x1b[1;32mInstalled\x1b[0m dependency '{}' successfully ({} files extracted).",
+        dep.alias, extracted_count
+    );
+
+    Ok(())
+}
+
+fn verify_fetched_manifest(dep: &Dependency, pkg_dir: &Path) -> Result<()> {
+    let manifest_file = pkg_dir.join("manifest.nibble");
+    let content = fs::read_to_string(&manifest_file).with_context(|| {
+        format!(
+            "Fetched dependency '{}' has no manifest.nibble at its root ({:?})",
+            dep.alias, manifest_file
+        )
+    })?;
+
+    let fetched = parse_manifest(&content)
+        .with_context(|| format!("Dependency '{}' has an invalid manifest.nibble", dep.alias))?;
+
+    if fetched.at.name != dep.at {
+        return Err(anyhow!(
+            "Dependency '{}' was expected to be AT '{}', but its manifest declares '{}'",
+            dep.alias,
+            dep.at,
+            fetched.at.name
+        ));
+    }
+
+    if let Some(requested_version) = &dep.version
+        && &fetched.at.version != requested_version
+    {
+        return Err(anyhow!(
+            "Dependency '{}' version mismatch: requested '{}', fetched AT declares '{}'",
+            dep.alias,
+            requested_version,
+            fetched.at.version
+        ));
+    }
+
+    Ok(())
 }
 
 pub fn resolve_local_manifest() -> Result<()> {
@@ -113,161 +545,31 @@ pub fn resolve_local_manifest() -> Result<()> {
         return Ok(());
     };
 
-    if let Some(deps) = manifest.dependencies {
-        for (name, source) in deps {
-            install_package(&name, &source)?;
-        }
+    for dep in &manifest.dependencies {
+        install_dependency(dep)?;
     }
 
     Ok(())
 }
 
-pub fn install_package(package_alias: &str, source: &DependencySource) -> Result<()> {
-    let packs_dir = get_packs_dir()?;
-    let target_pkg_base = packs_dir.join(package_alias);
+pub fn list() -> Result<()> {
+    resolve_local_manifest()?;
 
-    if target_pkg_base.exists() && fs::read_dir(&target_pkg_base)?.next().is_some() {
-        return Ok(());
-    }
+    let manifest = require_manifest()?;
 
-    let target_info = match source {
-        DependencySource::Named(registry_name) => {
-            let registry = get_default_registry();
+    println!("{}", manifest.at.name);
 
-            registry
-                .get(registry_name.as_str())
-                .cloned()
-                .ok_or_else(|| {
-                    anyhow!(
-                        "Package identity shortcut '{}' is missing from the global default package registry registry.",
-                        registry_name
-                    )
-                })?
-        }
+    let packs_dir = packs_dir();
 
-        DependencySource::Custom {
-            source,
-            root_dir,
-            archive_prefix,
-        } => {
-            let prefix = archive_prefix.clone().unwrap_or_else(|| {
-                source
-                    .split('/')
-                    .next_back()
-                    .unwrap_or("archive")
-                    .replace(".tar.gz", "")
-                    .replace(".zip", "")
-            });
+    for dep in &manifest.dependencies {
+        let cached = packs_dir.join(&dep.alias).join("manifest.nibble").is_file();
 
-            PackageRegistryInfo {
-                tarball_url: source.clone(),
-                archive_prefix: prefix,
-                root_dir: root_dir.clone(),
-            }
-        }
-    };
-
-    println!(
-        "\x1b[1;36mDownloading\x1b[0m dependency '{}'...",
-        package_alias
-    );
-
-    let response = reqwest::blocking::get(&target_info.tarball_url)
-        .with_context(|| {
-            format!(
-                "Network Connection Failure: Unable to pull remote tarball archive package target for dependency package '{}'. Double check your internet access setup.",
-                package_alias
-            )
-        })?;
-
-    if !response.status().is_success() {
-        return Err(anyhow!(
-            "Repository network server endpoint tracking '{}' returned failure status code: {}",
-            package_alias,
-            response.status()
-        ));
-    }
-
-    let tar_gz = flate2::read::GzDecoder::new(response);
-    let mut archive = tar::Archive::new(tar_gz);
-    let mut extracted_count = 0;
-
-    for entry_result in archive
-        .entries()
-        .context("Failed to decode tar data chunk frames stream payload context")?
-    {
-        let mut entry = entry_result
-            .context("Corrupt binary payload segment detected inside download bundle")?;
-
-        let path = entry
-            .path()
-            .context("Missing package entry path reference attributes")?
-            .to_path_buf();
-
-        let components: Vec<_> = path.components().collect();
-
-        if components.len() < 2 {
-            continue;
-        }
-
-        let first_dir = components[0].as_os_str().to_string_lossy();
-
-        if !first_dir.contains(&target_info.archive_prefix)
-            && first_dir != target_info.archive_prefix
-        {
-            continue;
-        }
-
-        let second_dir = components[1].as_os_str().to_string_lossy();
-
-        if second_dir != target_info.root_dir {
-            continue;
-        }
-
-        let relative_components: Vec<_> = components.iter().skip(2).collect();
-
-        if relative_components.is_empty() {
-            continue;
-        }
-
-        let mut final_relative_path = PathBuf::new();
-
-        for comp in relative_components {
-            final_relative_path.push(comp);
-        }
-
-        let out_file_path = target_pkg_base.join(&final_relative_path);
-
-        if let Some(parent) = out_file_path.parent() {
-            fs::create_dir_all(parent).context(
-                "Failed to initialize target output system folders hierarchy mapping requirements",
-            )?;
-        }
-
-        if entry.header().entry_type().is_file() {
-            entry.unpack(&out_file_path).with_context(|| {
-                format!(
-                    "Failed parsing compression allocation targets to folder storage destination: {:?}",
-                    out_file_path
-                )
-            })?;
-
-            extracted_count += 1;
+        if cached {
+            println!("{}", dep.alias);
+        } else {
+            println!("{} (not cached)", dep.alias);
         }
     }
-
-    if extracted_count == 0 {
-        return Err(anyhow!(
-            "Archive downloaded successfully, but zero files matched your designated 'root_dir = \"{}\"' path filter within prefix layout framework context '{}'.",
-            target_info.root_dir,
-            target_info.archive_prefix
-        ));
-    }
-
-    println!(
-        "\x1b[1;32mInstalled\x1b[0m dependency '{}' successfully ({} files extracted).",
-        package_alias, extracted_count
-    );
 
     Ok(())
 }

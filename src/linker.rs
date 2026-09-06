@@ -1,10 +1,11 @@
 use anyhow::{Context, Result, anyhow};
+use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const RUNTIME_VERSION: &str = "0.3.5";
-const REPO_URL: &str = "https://raw.githubusercontent.com/mysz-lang/mysz-runtime/main/binary";
+const RUNTIME_REPO: &str = "mysz-lang/mysz-runtime";
+const RUNTIME_BINARY_DIR: &str = "binary";
 
 fn host_compiler() -> &'static str {
     #[cfg(target_os = "windows")]
@@ -18,35 +19,111 @@ fn host_compiler() -> &'static str {
     }
 }
 
-fn fetch_runtime() -> Result<PathBuf> {
+fn runtime_cache_root() -> Result<PathBuf> {
     let home_dir = dirs::home_dir().context("Could not find user home directory")?;
+    Ok(home_dir.join(".nibble").join("cache"))
+}
 
-    let cache_dir = home_dir.join(".nibble").join("cache").join(RUNTIME_VERSION);
+#[derive(Deserialize)]
+struct GithubContentEntry {
+    name: String,
+    download_url: Option<String>,
+}
 
-    let lib_name = "libmysz-runtime.a";
-    let target_lib_path = cache_dir.join(lib_name);
+fn parse_runtime_filename(name: &str) -> Option<(u32, u32, u32)> {
+    let stripped = name
+        .strip_prefix("libmysz-runtime.")?
+        .strip_suffix(".tar.gz")?;
 
-    if target_lib_path.exists() {
-        return Ok(target_lib_path);
+    let mut parts = stripped.split('.');
+    let major: u32 = parts.next()?.parse().ok()?;
+    let minor: u32 = parts.next()?.parse().ok()?;
+    let patch: u32 = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
     }
 
-    fs::create_dir_all(&cache_dir).context("Failed to create runtime cache directory")?;
+    Some((major, minor, patch))
+}
 
-    let archive_name = format!("libmysz-runtime.{}.tar.gz", RUNTIME_VERSION);
+fn version_string(v: (u32, u32, u32)) -> String {
+    format!("{}.{}.{}", v.0, v.1, v.2)
+}
 
-    let download_url = format!("{}/{}", REPO_URL, archive_name);
-
-    println!(
-        "\x1b[1;36mDownloading\x1b[0m mysz-runtime v{} from remote repo...",
-        RUNTIME_VERSION
+fn resolve_latest_runtime() -> Result<((u32, u32, u32), String)> {
+    let api_url = format!(
+        "https://api.github.com/repos/{}/contents/{}",
+        RUNTIME_REPO, RUNTIME_BINARY_DIR
     );
 
-    let response = reqwest::blocking::get(&download_url)
-        .context("Connection failed. Check your network link to the GitHub runtime repository")?;
+    let response = reqwest::blocking::Client::new()
+        .get(&api_url)
+        .header("User-Agent", "nibble-cli")
+        .send()
+        .context("Failed to reach GitHub API while resolving the latest mysz-runtime version")?;
 
     if !response.status().is_success() {
         return Err(anyhow!(
-            "Failed to pull runtime library binary. Server responded with status code: {}",
+            "GitHub API returned status {} while listing mysz-runtime binaries (rate-limited?)",
+            response.status()
+        ));
+    }
+
+    let entries: Vec<GithubContentEntry> = response
+        .json()
+        .context("Failed to parse GitHub API response for mysz-runtime binaries")?;
+
+    let best = entries
+        .iter()
+        .filter_map(|e| parse_runtime_filename(&e.name).map(|v| (v, e)))
+        .max_by_key(|(v, _)| *v)
+        .ok_or_else(|| anyhow!("No libmysz-runtime.*.tar.gz files found in the runtime repo"))?;
+
+    let (version, entry) = best;
+    let download_url = entry
+        .download_url
+        .clone()
+        .ok_or_else(|| anyhow!("Runtime archive entry has no download_url"))?;
+
+    Ok((version, download_url))
+}
+
+fn highest_cached_runtime(cache_root: &Path) -> Option<(u32, u32, u32)> {
+    let entries = fs::read_dir(cache_root).ok()?;
+
+    entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+        .filter_map(|name| {
+            let mut parts = name.split('.');
+            let major: u32 = parts.next()?.parse().ok()?;
+            let minor: u32 = parts.next()?.parse().ok()?;
+            let patch: u32 = parts.next()?.parse().ok()?;
+            if parts.next().is_some() {
+                return None;
+            }
+            Some((major, minor, patch))
+        })
+        .max()
+}
+
+fn download_runtime_archive(download_url: &str, cache_dir: &Path) -> Result<PathBuf> {
+    let lib_name = "libmysz-runtime.a";
+    let target_lib_path = cache_dir.join(lib_name);
+
+    fs::create_dir_all(cache_dir).context("Failed to create runtime cache directory")?;
+
+    println!(
+        "\x1b[1;36mDownloading\x1b[0m mysz-runtime from {}...",
+        download_url
+    );
+
+    let response = reqwest::blocking::get(download_url)
+        .context("Connection failed while downloading the mysz-runtime archive")?;
+
+    if !response.status().is_success() {
+        return Err(anyhow!(
+            "Failed to download mysz-runtime archive. Server responded with status code: {}",
             response.status()
         ));
     }
@@ -55,17 +132,48 @@ fn fetch_runtime() -> Result<PathBuf> {
     let mut archive = tar::Archive::new(tar_gz);
 
     archive
-        .unpack(&cache_dir)
+        .unpack(cache_dir)
         .context("Corrupt compression framework encountered while unpacking runtime tarball")?;
 
     if !target_lib_path.exists() {
         return Err(anyhow!(
-            "Download completed successfully, but expected static asset '{}' was missing inside the archive context.",
+            "Download completed successfully, but expected static asset '{}' was missing inside the archive.",
             lib_name
         ));
     }
 
     Ok(target_lib_path)
+}
+
+fn fetch_runtime() -> Result<PathBuf> {
+    let cache_root = runtime_cache_root()?;
+
+    match resolve_latest_runtime() {
+        Ok((version, download_url)) => {
+            let cache_dir = cache_root.join(version_string(version));
+            let target_lib_path = cache_dir.join("libmysz-runtime.a");
+
+            if target_lib_path.exists() {
+                return Ok(target_lib_path);
+            }
+
+            download_runtime_archive(&download_url, &cache_dir)
+        }
+        Err(resolve_err) => {
+            if let Some(cached_version) = highest_cached_runtime(&cache_root) {
+                eprintln!(
+                    "\x1b[1;33mWarning:\x1b[0m could not resolve the latest mysz-runtime ({}), using cached v{}",
+                    resolve_err,
+                    version_string(cached_version)
+                );
+                let cache_dir = cache_root.join(version_string(cached_version));
+                Ok(cache_dir.join("libmysz-runtime.a"))
+            } else {
+                Err(resolve_err
+                    .context("and no cached mysz-runtime is available locally to fall back on"))
+            }
+        }
+    }
 }
 
 pub fn link_binary(
@@ -107,7 +215,6 @@ pub fn link_shared(obj_paths: &[PathBuf], output: &Path, link_files: &[PathBuf])
 
     let mut args = Vec::new();
 
-    // Produce a real ELF shared object.
     args.push("-shared".into());
 
     for obj in obj_paths {
@@ -129,13 +236,15 @@ pub fn link_shared(obj_paths: &[PathBuf], output: &Path, link_files: &[PathBuf])
 }
 
 fn create_output_parent(output: &Path) -> Result<()> {
-    if let Some(parent) = output.parent() && !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!(
-                    "Failed to create output destination directory: {:?}",
-                    parent
-                )
-            })?;
+    if let Some(parent) = output.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "Failed to create output destination directory: {:?}",
+                parent
+            )
+        })?;
     }
 
     Ok(())
