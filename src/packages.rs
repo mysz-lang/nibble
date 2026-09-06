@@ -17,32 +17,6 @@ pub fn build_dir() -> PathBuf {
 
 pub const GITIGNORE_CONTENT: &str = "# Nibble\nnout/\n";
 
-#[derive(Debug, Clone)]
-pub struct CompilerConfig {
-    pub target: String,
-}
-
-impl Default for CompilerConfig {
-    fn default() -> Self {
-        Self {
-            target: "cranelift".to_string(),
-        }
-    }
-}
-
-impl CompilerConfig {
-    pub fn target(&self) -> Result<mysz_core::utils::ctx::CompilerTarget> {
-        match self.target.to_lowercase().as_str() {
-            "cranelift" => Ok(mysz_core::utils::ctx::CompilerTarget::Cranelift),
-            "llvm" => Ok(mysz_core::utils::ctx::CompilerTarget::Llvm),
-            other => Err(anyhow!(
-                "Unknown compiler target '{}'. Expected 'cranelift' or 'llvm'",
-                other
-            )),
-        }
-    }
-}
-
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct AtMetadata {
@@ -71,7 +45,6 @@ pub struct Dependency {
 #[derive(Debug, Clone)]
 pub struct Manifest {
     pub at: AtMetadata,
-    pub compiler: CompilerConfig,
     pub dependencies: Vec<Dependency>,
 }
 
@@ -190,16 +163,6 @@ fn parse_at_node(node: &KdlNode) -> Result<AtMetadata> {
     })
 }
 
-fn parse_compiler_node(node: &KdlNode) -> Result<CompilerConfig> {
-    const ALLOWED: &[&str] = &["target"];
-    ensure_known_props(node, ALLOWED, false)?;
-
-    let target =
-        optional_str_prop(node, "target")?.unwrap_or_else(|| "cranelift".to_string());
-
-    Ok(CompilerConfig { target })
-}
-
 fn parse_dependency_node(node: &KdlNode) -> Result<Dependency> {
     const ALLOWED: &[&str] = &["at", "version", "source"];
     ensure_known_props(node, ALLOWED, false)?;
@@ -244,7 +207,6 @@ pub fn parse_manifest(text: &str) -> Result<Manifest> {
         .map_err(|e| anyhow!("Failed to parse manifest.nibble: {}", e))?;
 
     let mut at: Option<AtMetadata> = None;
-    let mut compiler = CompilerConfig::default();
     let mut dependencies = Vec::new();
 
     for node in doc.nodes() {
@@ -257,10 +219,6 @@ pub fn parse_manifest(text: &str) -> Result<Manifest> {
                 }
 
                 at = Some(parse_at_node(node)?);
-            }
-
-            "compiler" => {
-                compiler = parse_compiler_node(node)?;
             }
 
             "dependencies" => {
@@ -285,7 +243,6 @@ pub fn parse_manifest(text: &str) -> Result<Manifest> {
 
     Ok(Manifest {
         at,
-        compiler,
         dependencies,
     })
 }

@@ -999,9 +999,9 @@ dependencies = [
 
 [[package]]
 name = "mysz-core"
-version = "0.5.0"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87a37c0c70aed2453da1cff542ee20a29e092e6028d9cd0f8d254a0e786c538f"
+checksum = "964f3409987f6b3fed7f80056d4d7a11664dd5a8312c885041088f9c990c901c"
 dependencies = [
  "clap",
  "cranelift",

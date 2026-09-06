@@ -6,7 +6,7 @@ authors = ["Mysz Team"]
 description = "Mysz •<:3O-~"
 
 [dependencies]
-mysz-core = "0.5.0"
+mysz-core = "0.5.3"
 
 clap = { version = "4.4", features = ["derive", "env"] }
 anyhow = "1.0"

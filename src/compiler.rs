@@ -17,7 +17,6 @@ pub struct Pipeline {
     noruntime: bool,
     link_files: Vec<PathBuf>,
     include_paths: Vec<PathBuf>,
-    compiler: packages::CompilerConfig,
     result: ResultType,
     at_metadata: packages::AtMetadata,
     dependencies: Vec<packages::Dependency>,
@@ -39,7 +38,6 @@ impl Pipeline {
 
         let manifest = packages::require_manifest()?;
         let at_metadata = manifest.at;
-        let compiler = manifest.compiler;
         let dependencies = manifest.dependencies;
 
         include_paths.push(packages::packs_dir());
@@ -67,7 +65,6 @@ impl Pipeline {
             noruntime,
             link_files,
             include_paths,
-            compiler,
             result,
             at_metadata,
             dependencies,
@@ -242,8 +239,7 @@ impl Pipeline {
             .map(|e| PathBuf::from(".").join(e))
             .unwrap_or_else(|| PathBuf::from("."));
 
-        let target = self.compiler.target()?;
-        let ctx = CompilerCtx::new(&entry_file_path, &self.include_paths, false, target);
+        let ctx = CompilerCtx::new(&entry_file_path, &self.include_paths, false);
 
         compile_at_graph(
             &ctx,
@@ -330,8 +326,6 @@ impl Pipeline {
 
         let manifest = packages::require_manifest()?;
         let at_metadata = manifest.at;
-        let compiler = manifest.compiler;
-        let target = compiler.target()?;
 
         include_paths.push(packages::packs_dir());
         include_paths.push(PathBuf::from("."));
@@ -361,7 +355,7 @@ impl Pipeline {
             .map(|e| PathBuf::from(".").join(e))
             .unwrap_or_else(|| PathBuf::from("."));
 
-        let ctx = CompilerCtx::new(&entry_file_path, &include_paths, true, target);
+        let ctx = CompilerCtx::new(&entry_file_path, &include_paths, true);
 
         check_at(&ctx, &all_ats, &entry).map_err(|e| anyhow!("{}", e))
     }
