@@ -101,15 +101,8 @@ fn main() {
             include,
             output,
             result,
-        } => compiler::Pipeline::new(
-            output,
-            optimize,
-            noruntime,
-            link_files,
-            include,
-            result,
-        )
-        .and_then(|pipeline| pipeline.compile()),
+        } => compiler::Pipeline::new(output, optimize, noruntime, link_files, include, result)
+            .and_then(|pipeline| pipeline.compile()),
 
         Commands::Run { include } => compiler::Pipeline::run_ephemeral(include),
 
@@ -141,9 +134,7 @@ fn main() {
             compiler::Pipeline::check(include)
         }
 
-        Commands::Clean => {
-            packages::clean()
-        }
+        Commands::Clean => packages::clean(),
     };
 
     if outp {
@@ -182,7 +173,10 @@ fn initialise(projname: Option<String>) -> Result<(), anyhow::Error> {
         .expect("Failed to execute command: git init");
 
     if !gitinit.status.success() {
-        eprintln!("Error initialising Git repository: {}", String::from_utf8_lossy(&gitinit.stderr));
+        eprintln!(
+            "Error initialising Git repository: {}",
+            String::from_utf8_lossy(&gitinit.stderr)
+        );
     }
 
     let src_dir = base_dir.join("src");

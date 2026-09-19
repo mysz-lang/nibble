@@ -39,7 +39,6 @@ pub struct CompilerConf {
     pub debug: bool,
 }
 
-
 #[derive(Debug, Clone)]
 pub struct Dependency {
     pub alias: String,
@@ -95,15 +94,11 @@ fn optional_bool_prop(node: &KdlNode, key: &str) -> Result<Option<bool>> {
     for entry in node.entries() {
         if let Some(name) = entry.name()
             && name.value() == key
-            {
-                return kdl_bool(entry.value()).map(Some).ok_or_else(|| {
-                    anyhow!(
-                        "'{}' on node '{}' must be a bool",
-                        key,
-                        node.name().value()
-                    )
-                });
-            }
+        {
+            return kdl_bool(entry.value()).map(Some).ok_or_else(|| {
+                anyhow!("'{}' on node '{}' must be a bool", key, node.name().value())
+            });
+        }
     }
 
     Ok(None)
@@ -262,9 +257,7 @@ pub fn parse_manifest(text: &str) -> Result<Manifest> {
         match node.name().value() {
             "at" => {
                 if at.is_some() {
-                    return Err(anyhow!(
-                        "Duplicate 'at' node in manifest.nibble"
-                    ));
+                    return Err(anyhow!("Duplicate 'at' node in manifest.nibble"));
                 }
 
                 at = Some(parse_at_node(node)?);
@@ -276,9 +269,7 @@ pub fn parse_manifest(text: &str) -> Result<Manifest> {
 
             "compiler" => {
                 if comp.is_some() {
-                    return Err(anyhow!(
-                        "Duplicate 'at' node in manifest.nibble"
-                    ));
+                    return Err(anyhow!("Duplicate 'at' node in manifest.nibble"));
                 }
 
                 comp = Some(parse_compiler_node(node)?);
@@ -294,18 +285,14 @@ pub fn parse_manifest(text: &str) -> Result<Manifest> {
         }
     }
 
-    let at = at.ok_or_else(|| {
-        anyhow!(
-            "manifest.nibble is missing a required 'at' node"
-        )
-    })?;
+    let at = at.ok_or_else(|| anyhow!("manifest.nibble is missing a required 'at' node"))?;
 
     let comp = comp.unwrap_or(CompilerConf { debug: false });
 
     Ok(Manifest {
         at,
         dependencies,
-        compilerconf: comp
+        compilerconf: comp,
     })
 }
 
@@ -321,12 +308,10 @@ pub fn load_manifest() -> Result<Option<Manifest>> {
     }
 
     let content =
-        fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read {:?}", path))?;
+        fs::read_to_string(&path).with_context(|| format!("Failed to read {:?}", path))?;
 
     let manifest =
-        parse_manifest(&content)
-            .with_context(|| format!("Invalid manifest at {:?}", path))?;
+        parse_manifest(&content).with_context(|| format!("Invalid manifest at {:?}", path))?;
 
     Ok(Some(manifest))
 }
@@ -344,12 +329,7 @@ pub fn add_dependency_to_manifest(dep: &Dependency) -> Result<()> {
     let path = manifest_path();
 
     let content = fs::read_to_string(&path)
-        .with_context(|| {
-            format!(
-                "Failed to read {:?} — run `nibble init` first?",
-                path
-            )
-        })?;
+        .with_context(|| format!("Failed to read {:?} — run `nibble init` first?", path))?;
 
     let mut doc: KdlDocument = content
         .parse()
@@ -406,8 +386,7 @@ pub fn add_dependency_to_manifest(dep: &Dependency) -> Result<()> {
         }
     }
 
-    fs::write(&path, doc.to_string())
-        .with_context(|| format!("Failed to write {:?}", path))?;
+    fs::write(&path, doc.to_string()).with_context(|| format!("Failed to write {:?}", path))?;
 
     Ok(())
 }
@@ -445,10 +424,7 @@ fn source_to_tarball_url(source: &str, version: Option<&str>) -> Result<String> 
                 repo, version
             ),
 
-            None => format!(
-                "https://github.com/{}/archive/refs/heads/main.tar.gz",
-                repo
-            ),
+            None => format!("https://github.com/{}/archive/refs/heads/main.tar.gz", repo),
         });
     }
 
@@ -545,21 +521,20 @@ pub fn install_dependency(dep: &Dependency) -> Result<()> {
     let tar_gz = flate2::read::GzDecoder::new(response);
     let mut archive = tar::Archive::new(tar_gz);
 
-    fs::create_dir_all(&target_dir)
-        .with_context(|| {
-            format!(
-                "Failed to create cache directory for @{} at {:?}",
-                dep.alias, target_dir
-            )
-        })?;
+    fs::create_dir_all(&target_dir).with_context(|| {
+        format!(
+            "Failed to create cache directory for @{} at {:?}",
+            dep.alias, target_dir
+        )
+    })?;
 
     let mut extracted_count = 0;
 
-    for entry_result in archive.entries().context(
-        "Failed to read dependency archive entries"
-    )? {
-        let mut entry = entry_result
-            .context("Corrupt entry in downloaded dependency archive")?;
+    for entry_result in archive
+        .entries()
+        .context("Failed to read dependency archive entries")?
+    {
+        let mut entry = entry_result.context("Corrupt entry in downloaded dependency archive")?;
 
         let path = entry
             .path()
@@ -581,23 +556,15 @@ pub fn install_dependency(dep: &Dependency) -> Result<()> {
         let out_path = target_dir.join(&rest);
 
         if let Some(parent) = out_path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| {
-                    format!(
-                        "Failed to create directory while extracting @{}",
-                        dep.alias
-                    )
-                })?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create directory while extracting @{}", dep.alias)
+            })?;
         }
 
         if entry.header().entry_type().is_file() {
-            entry.unpack(&out_path)
-                .with_context(|| {
-                    format!(
-                        "Failed to extract {:?} from @{}",
-                        out_path, dep.alias
-                    )
-                })?;
+            entry
+                .unpack(&out_path)
+                .with_context(|| format!("Failed to extract {:?} from @{}", out_path, dep.alias))?;
 
             extracted_count += 1;
         }
@@ -620,27 +587,18 @@ pub fn install_dependency(dep: &Dependency) -> Result<()> {
     Ok(())
 }
 
-fn verify_fetched_manifest(
-    dep: &Dependency,
-    pkg_dir: &Path,
-) -> Result<()> {
+fn verify_fetched_manifest(dep: &Dependency, pkg_dir: &Path) -> Result<()> {
     let manifest_file = pkg_dir.join("manifest.nibble");
 
-    let content = fs::read_to_string(&manifest_file)
-        .with_context(|| {
-            format!(
-                "Fetched @{} has no manifest.nibble at its root ({:?})",
-                dep.alias, manifest_file
-            )
-        })?;
+    let content = fs::read_to_string(&manifest_file).with_context(|| {
+        format!(
+            "Fetched @{} has no manifest.nibble at its root ({:?})",
+            dep.alias, manifest_file
+        )
+    })?;
 
     let fetched = parse_manifest(&content)
-        .with_context(|| {
-            format!(
-                "@{} has an invalid manifest.nibble",
-                dep.alias
-            )
-        })?;
+        .with_context(|| format!("@{} has an invalid manifest.nibble", dep.alias))?;
 
     if fetched.at.name != dep.at {
         return Err(anyhow!(
@@ -687,10 +645,7 @@ pub fn list() -> Result<()> {
     println!("@{}", manifest.at.name);
 
     for dep in &manifest.dependencies {
-        let cached = packs_dir
-            .join(&dep.alias)
-            .join("manifest.nibble")
-            .is_file();
+        let cached = packs_dir.join(&dep.alias).join("manifest.nibble").is_file();
 
         if cached {
             println!("@{}", dep.alias);
@@ -709,13 +664,9 @@ pub fn clean() -> Result<()> {
         return Ok(());
     }
 
-    fs::remove_dir_all(&dir)
-        .with_context(|| format!("Failed to remove {:?}", dir))?;
+    fs::remove_dir_all(&dir).with_context(|| format!("Failed to remove {:?}", dir))?;
 
-    println!(
-        "\x1b[1;32mCleaned\x1b[0m {}",
-        dir.display()
-    );
+    println!("\x1b[1;32mCleaned\x1b[0m {}", dir.display());
 
     Ok(())
 }

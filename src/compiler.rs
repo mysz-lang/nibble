@@ -72,7 +72,7 @@ impl Pipeline {
             at_metadata,
             dependencies,
             dependency_ats,
-            compilerconf
+            compilerconf,
         })
     }
 
@@ -221,10 +221,7 @@ impl Pipeline {
         fs::create_dir_all(&obj_dir).with_context(|| format!("Failed to create {:?}", obj_dir))?;
         let obj_path = obj_dir.join("out.o");
 
-        println!(
-            "\x1b[1;34mCompiling\x1b[0m @{}...",
-            self.at_metadata.name
-        );
+        println!("\x1b[1;34mCompiling\x1b[0m @{}...", self.at_metadata.name);
 
         let debug = self.compilerconf.debug;
 
