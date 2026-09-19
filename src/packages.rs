@@ -35,6 +35,12 @@ impl AtMetadata {
 }
 
 #[derive(Debug, Clone)]
+pub struct CompilerConf {
+    pub debug: bool,
+}
+
+
+#[derive(Debug, Clone)]
 pub struct Dependency {
     pub alias: String,
     pub at: String,
@@ -46,10 +52,15 @@ pub struct Dependency {
 pub struct Manifest {
     pub at: AtMetadata,
     pub dependencies: Vec<Dependency>,
+    pub compilerconf: CompilerConf,
 }
 
 fn kdl_str(value: &KdlValue) -> Option<String> {
     value.as_string().map(|s| s.to_string())
+}
+
+fn kdl_bool(value: &KdlValue) -> Option<bool> {
+    value.as_bool()
 }
 
 fn optional_str_prop(node: &KdlNode, key: &str) -> Result<Option<String>> {
@@ -72,6 +83,34 @@ fn optional_str_prop(node: &KdlNode, key: &str) -> Result<Option<String>> {
 
 fn require_str_prop(node: &KdlNode, key: &str) -> Result<String> {
     optional_str_prop(node, key)?.ok_or_else(|| {
+        anyhow!(
+            "Missing required '{}' attribute on node '{}'",
+            key,
+            node.name().value()
+        )
+    })
+}
+
+fn optional_bool_prop(node: &KdlNode, key: &str) -> Result<Option<bool>> {
+    for entry in node.entries() {
+        if let Some(name) = entry.name()
+            && name.value() == key
+            {
+                return kdl_bool(entry.value()).map(Some).ok_or_else(|| {
+                    anyhow!(
+                        "'{}' on node '{}' must be a bool",
+                        key,
+                        node.name().value()
+                    )
+                });
+            }
+    }
+
+    Ok(None)
+}
+
+fn require_bool_prop(node: &KdlNode, key: &str) -> Result<bool> {
+    optional_bool_prop(node, key)?.ok_or_else(|| {
         anyhow!(
             "Missing required '{}' attribute on node '{}'",
             key,
@@ -105,6 +144,15 @@ fn ensure_known_props(node: &KdlNode, allowed: &[&str], allow_positional: bool) 
     }
 
     Ok(())
+}
+
+fn parse_compiler_node(node: &KdlNode) -> Result<CompilerConf> {
+    const ALLOWED: &[&str] = &["debug"];
+    ensure_known_props(node, ALLOWED, false)?;
+
+    let debug = require_bool_prop(node, "debug")?;
+
+    Ok(CompilerConf { debug })
 }
 
 fn parse_at_node(node: &KdlNode) -> Result<AtMetadata> {
@@ -208,6 +256,7 @@ pub fn parse_manifest(text: &str) -> Result<Manifest> {
 
     let mut at: Option<AtMetadata> = None;
     let mut dependencies = Vec::new();
+    let mut comp: Option<CompilerConf> = None;
 
     for node in doc.nodes() {
         match node.name().value() {
@@ -223,6 +272,16 @@ pub fn parse_manifest(text: &str) -> Result<Manifest> {
 
             "dependencies" => {
                 dependencies = parse_dependencies_node(node)?;
+            }
+
+            "compiler" => {
+                if comp.is_some() {
+                    return Err(anyhow!(
+                        "Duplicate 'at' node in manifest.nibble"
+                    ));
+                }
+
+                comp = Some(parse_compiler_node(node)?);
             }
 
             other => {
@@ -241,9 +300,12 @@ pub fn parse_manifest(text: &str) -> Result<Manifest> {
         )
     })?;
 
+    let comp = comp.unwrap_or(CompilerConf { debug: false });
+
     Ok(Manifest {
         at,
         dependencies,
+        compilerconf: comp
     })
 }
 

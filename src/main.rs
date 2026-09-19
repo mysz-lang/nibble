@@ -7,6 +7,7 @@ use clap::{Parser, Subcommand};
 use std::fs::{File, create_dir};
 use std::io::Write;
 use std::path::PathBuf;
+use std::process::Command;
 use std::time::Instant;
 
 use crate::out::ResultType;
@@ -175,6 +176,15 @@ fn initialise(projname: Option<String>) -> Result<(), anyhow::Error> {
             .unwrap_or_else(|| "main".to_string())
     };
 
+    let gitinit = Command::new("git")
+        .arg("init")
+        .output()
+        .expect("Failed to execute command: git init");
+
+    if !gitinit.status.success() {
+        eprintln!("Error initialising Git repository: {}", String::from_utf8_lossy(&gitinit.stderr));
+    }
+
     let src_dir = base_dir.join("src");
     std::fs::create_dir_all(&src_dir)?;
 
@@ -183,9 +193,10 @@ fn initialise(projname: Option<String>) -> Result<(), anyhow::Error> {
     let mut gitignore = File::create(base_dir.join(".gitignore"))?;
 
     let mainmysz_content = r#"use std::io;
+use std::cout;
 
 fn pub main(): int {
-    println("Hello, world!");
+    println(stderr(), "Hello, world!");
     return 0;
 };"#;
 
@@ -196,12 +207,8 @@ fn pub main(): int {
     author ""
 }}
 
-compiler {{
-    target "cranelift"
-}}
-
 dependencies {{
-    std version="0.3.5"
+    std version="0.4.0"
 }}
 "#,
         name = name,

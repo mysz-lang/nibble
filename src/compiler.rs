@@ -19,6 +19,7 @@ pub struct Pipeline {
     include_paths: Vec<PathBuf>,
     result: ResultType,
     at_metadata: packages::AtMetadata,
+    compilerconf: packages::CompilerConf,
     dependencies: Vec<packages::Dependency>,
     dependency_ats: Vec<ATInfo>,
 }
@@ -39,6 +40,8 @@ impl Pipeline {
         let manifest = packages::require_manifest()?;
         let at_metadata = manifest.at;
         let dependencies = manifest.dependencies;
+
+        let compilerconf = manifest.compilerconf;
 
         include_paths.push(packages::packs_dir());
         include_paths.push(PathBuf::from("."));
@@ -69,6 +72,7 @@ impl Pipeline {
             at_metadata,
             dependencies,
             dependency_ats,
+            compilerconf
         })
     }
 
@@ -222,6 +226,8 @@ impl Pipeline {
             self.at_metadata.name
         );
 
+        let debug = self.compilerconf.debug;
+
         let project_at = Self::build_project_at(&self.at_metadata, &self.dependencies)?;
 
         let mut all_ats = vec![project_at];
@@ -239,7 +245,7 @@ impl Pipeline {
             .map(|e| PathBuf::from(".").join(e))
             .unwrap_or_else(|| PathBuf::from("."));
 
-        let ctx = CompilerCtx::new(&entry_file_path, &self.include_paths, false);
+        let ctx = CompilerCtx::new(&entry_file_path, &self.include_paths, false, debug);
 
         compile_at_graph(
             &ctx,
@@ -355,7 +361,7 @@ impl Pipeline {
             .map(|e| PathBuf::from(".").join(e))
             .unwrap_or_else(|| PathBuf::from("."));
 
-        let ctx = CompilerCtx::new(&entry_file_path, &include_paths, true);
+        let ctx = CompilerCtx::new(&entry_file_path, &include_paths, true, false);
 
         check_at(&ctx, &all_ats, &entry).map_err(|e| anyhow!("{}", e))
     }
